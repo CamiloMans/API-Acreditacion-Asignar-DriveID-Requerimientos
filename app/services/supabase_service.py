@@ -1,129 +1,138 @@
 """Servicio para interactuar con Supabase."""
 import logging
-from typing import Dict, Any, Optional
+from typing import Optional, Dict, Any
 from supabase import create_client, Client
-
 from app.config import settings
 
 logger = logging.getLogger(__name__)
 
 
 class SupabaseService:
-    """Servicio para interactuar con Supabase."""
+    """Servicio para operaciones con Supabase."""
     
-    def __init__(self, supabase_url: Optional[str] = None, supabase_key: Optional[str] = None):
-        self.supabase_url = supabase_url or settings.supabase_url
-        self.supabase_key = supabase_key or settings.supabase_key
-        self.supabase: Optional[Client] = None
-        
-        if self.supabase_url and self.supabase_key:
-            self.supabase = create_client(self.supabase_url, self.supabase_key)
+    def __init__(self):
+        """Inicializa el cliente de Supabase."""
+        self.client: Client = create_client(settings.SUPABASE_URL, settings.SUPABASE_KEY)
+        logger.info(f"Cliente Supabase inicializado para proyecto: {settings.SUPABASE_PROJECT_ID}")
     
-    def actualizar_drive_folder_ids(self, json_final: Dict[str, Any]) -> Dict[str, Any]:
+    def buscar_drive_folder_id_trabajador(
+        self, 
+        codigo_proyecto: str, 
+        nombre_trabajador: str
+    ) -> Optional[str]:
         """
-        Actualiza los campos drive_folder_id en Supabase usando los valores del JSON final.
+        Busca el drive_folder_id en fct_acreditacion_solicitud_trabajador_manual.
         
         Args:
-            json_final: Diccionario con la estructura del JSON final (con id_folder en cada registro)
-        
+            codigo_proyecto: Código del proyecto
+            nombre_trabajador: Nombre del trabajador
+            
         Returns:
-            Diccionario con el resumen de actualizaciones (exitosas y fallidas)
+            drive_folder_id si se encuentra, None si no
         """
-        if not self.supabase:
-            logger.warning("Supabase no está configurado. No se actualizarán los drive_folder_id.")
-            return {
-                'especialistas_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'especialistas_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'conductores_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-                'conductores_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []}
-            }
+        try:
+            response = self.client.table("fct_acreditacion_solicitud_trabajador_manual")\
+                .select("drive_folder_id")\
+                .eq("codigo_proyecto", codigo_proyecto)\
+                .eq("nombre_trabajador", nombre_trabajador)\
+                .limit(1)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                drive_folder_id = response.data[0].get("drive_folder_id")
+                logger.info(
+                    f"Encontrado drive_folder_id en trabajador: {nombre_trabajador} -> {drive_folder_id}"
+                )
+                return drive_folder_id
+            else:
+                logger.debug(
+                    f"No se encontró drive_folder_id en trabajador para: {codigo_proyecto}, {nombre_trabajador}"
+                )
+                return None
+        except Exception as e:
+            logger.error(
+                f"Error buscando drive_folder_id en trabajador para {nombre_trabajador}: {e}"
+            )
+            return None
+    
+    def buscar_drive_folder_id_conductor(
+        self, 
+        codigo_proyecto: str, 
+        nombre_trabajador: str
+    ) -> Optional[str]:
+        """
+        Busca el drive_folder_id en fct_acreditacion_solicitud_conductor_manual.
         
-        resultados = {
-            'especialistas_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'especialistas_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'conductores_myma': {'exitosos': 0, 'fallidos': 0, 'errores': []},
-            'conductores_externo': {'exitosos': 0, 'fallidos': 0, 'errores': []}
-        }
+        Args:
+            codigo_proyecto: Código del proyecto
+            nombre_trabajador: Nombre del trabajador
+            
+        Returns:
+            drive_folder_id si se encuentra, None si no
+        """
+        try:
+            response = self.client.table("fct_acreditacion_solicitud_conductor_manual")\
+                .select("drive_folder_id")\
+                .eq("codigo_proyecto", codigo_proyecto)\
+                .eq("nombre_trabajador", nombre_trabajador)\
+                .limit(1)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                drive_folder_id = response.data[0].get("drive_folder_id")
+                logger.info(
+                    f"Encontrado drive_folder_id en conductor: {nombre_trabajador} -> {drive_folder_id}"
+                )
+                return drive_folder_id
+            else:
+                logger.debug(
+                    f"No se encontró drive_folder_id en conductor para: {codigo_proyecto}, {nombre_trabajador}"
+                )
+                return None
+        except Exception as e:
+            logger.error(
+                f"Error buscando drive_folder_id en conductor para {nombre_trabajador}: {e}"
+            )
+            return None
+    
+    def actualizar_brg_acreditacion_solicitud_requerimiento(
+        self, 
+        registro_id: int, 
+        drive_folder_id: str
+    ) -> bool:
+        """
+        Actualiza el drive_folder_id en brg_acreditacion_solicitud_requerimiento.
         
-        # Actualizar especialistas MYMA
-        if 'myma' in json_final and 'especialistas' in json_final['myma']:
-            for especialista in json_final['myma']['especialistas']:
-                if 'id' in especialista and 'id_folder' in especialista:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_trabajador_manual')\
-                            .update({'drive_folder_id': especialista['id_folder']})\
-                            .eq('id', especialista['id'])\
-                            .execute()
-                        resultados['especialistas_myma']['exitosos'] += 1
-                        logger.info(f"Actualizado especialista MYMA {especialista.get('nombre', 'N/A')} (ID: {especialista['id']})")
-                    except Exception as e:
-                        resultados['especialistas_myma']['fallidos'] += 1
-                        resultados['especialistas_myma']['errores'].append({
-                            'id': especialista['id'],
-                            'nombre': especialista.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando especialista MYMA {especialista.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar especialistas Externo
-        if 'externo' in json_final and 'especialistas' in json_final['externo']:
-            for especialista in json_final['externo']['especialistas']:
-                if 'id' in especialista and 'id_folder' in especialista:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_trabajador_manual')\
-                            .update({'drive_folder_id': especialista['id_folder']})\
-                            .eq('id', especialista['id'])\
-                            .execute()
-                        resultados['especialistas_externo']['exitosos'] += 1
-                        logger.info(f"Actualizado especialista Externo {especialista.get('nombre', 'N/A')} (ID: {especialista['id']})")
-                    except Exception as e:
-                        resultados['especialistas_externo']['fallidos'] += 1
-                        resultados['especialistas_externo']['errores'].append({
-                            'id': especialista['id'],
-                            'nombre': especialista.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando especialista Externo {especialista.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar conductores MYMA
-        if 'myma' in json_final and 'conductores' in json_final['myma']:
-            for conductor in json_final['myma']['conductores']:
-                if 'id' in conductor and 'id_folder' in conductor:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_conductor_manual')\
-                            .update({'drive_folder_id': conductor['id_folder']})\
-                            .eq('id', conductor['id'])\
-                            .execute()
-                        resultados['conductores_myma']['exitosos'] += 1
-                        logger.info(f"Actualizado conductor MYMA {conductor.get('nombre', 'N/A')} (ID: {conductor['id']})")
-                    except Exception as e:
-                        resultados['conductores_myma']['fallidos'] += 1
-                        resultados['conductores_myma']['errores'].append({
-                            'id': conductor['id'],
-                            'nombre': conductor.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando conductor MYMA {conductor.get('nombre', 'N/A')}: {e}")
-        
-        # Actualizar conductores Externo
-        if 'externo' in json_final and 'conductores' in json_final['externo']:
-            for conductor in json_final['externo']['conductores']:
-                if 'id' in conductor and 'id_folder' in conductor:
-                    try:
-                        self.supabase.table('fct_acreditacion_solicitud_conductor_manual')\
-                            .update({'drive_folder_id': conductor['id_folder']})\
-                            .eq('id', conductor['id'])\
-                            .execute()
-                        resultados['conductores_externo']['exitosos'] += 1
-                        logger.info(f"Actualizado conductor Externo {conductor.get('nombre', 'N/A')} (ID: {conductor['id']})")
-                    except Exception as e:
-                        resultados['conductores_externo']['fallidos'] += 1
-                        resultados['conductores_externo']['errores'].append({
-                            'id': conductor['id'],
-                            'nombre': conductor.get('nombre', 'N/A'),
-                            'error': str(e)
-                        })
-                        logger.error(f"Error actualizando conductor Externo {conductor.get('nombre', 'N/A')}: {e}")
-        
-        return resultados
+        Args:
+            registro_id: ID del registro a actualizar
+            drive_folder_id: Drive folder ID a asignar
+            
+        Returns:
+            True si se actualizó exitosamente, False si no
+        """
+        try:
+            response = self.client.table("brg_acreditacion_solicitud_requerimiento")\
+                .update({"drive_folder_id": drive_folder_id})\
+                .eq("id", registro_id)\
+                .execute()
+            
+            if response.data and len(response.data) > 0:
+                logger.info(
+                    f"Actualizado registro {registro_id} con drive_folder_id: {drive_folder_id}"
+                )
+                return True
+            else:
+                logger.warning(
+                    f"No se encontró registro con id {registro_id} para actualizar"
+                )
+                return False
+        except Exception as e:
+            logger.error(
+                f"Error actualizando registro {registro_id} con drive_folder_id {drive_folder_id}: {e}"
+            )
+            return False
+
+
+# Instancia global del servicio
+supabase_service = SupabaseService()
 

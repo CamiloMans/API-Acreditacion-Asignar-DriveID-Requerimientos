@@ -1,2 +1,2 @@
-# Services module
+"""Servicios de la aplicación."""
 

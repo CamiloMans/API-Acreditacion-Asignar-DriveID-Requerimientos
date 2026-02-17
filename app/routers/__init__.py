@@ -1,2 +1,2 @@
-# Routers module
+"""Routers de la aplicación."""
 

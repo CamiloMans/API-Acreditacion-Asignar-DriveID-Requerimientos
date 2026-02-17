@@ -1,0 +1,209 @@
+"""Router para asignar folder ID a requerimiento."""
+import logging
+
+from fastapi import APIRouter
+
+from app.models import (
+    AsignarFolderRequest,
+    AsignarFolderResponse,
+    RegistroResponse,
+    ResumenActualizacion,
+)
+from app.services.drive_service import drive_service
+from app.services.supabase_service import supabase_service
+
+logger = logging.getLogger(__name__)
+
+router = APIRouter(prefix="/asignar-folder", tags=["asignar-folder"])
+
+
+def _normalize(value: str) -> str:
+    """Normaliza texto para comparaciones case-insensitive + trim."""
+    return value.strip().lower()
+
+
+@router.post("", response_model=AsignarFolderResponse)
+async def asignar_folder(request: AsignarFolderRequest):
+    """
+    Asigna drive_folder_id a registros en brg_acreditacion_solicitud_requerimiento.
+
+    Reglas:
+    - categoria_requerimiento == Empresa:
+      - empresa_acreditacion == Myma -> carpeta 02 MYMA bajo 01 Acreditacion
+      - otra empresa -> carpeta 01 Externos, luego carpeta de la empresa
+    - categoria_requerimiento != Empresa:
+      - se mantiene flujo actual por Supabase (trabajador/conductor)
+    """
+    logger.info(
+        "Procesando asignacion de folder para proyecto=%s registros=%s",
+        request.codigo_proyecto,
+        len(request.registros),
+    )
+
+    registros_procesados = []
+    actualizados_exitosos = 0
+    actualizados_fallidos = 0
+    sin_drive_folder_id = 0
+
+    # Cache por request para evitar recalcular ruta del proyecto en cada registro Empresa.
+    proyecto_drive_ctx = None
+    proyecto_drive_resuelto = False
+
+    for registro in request.registros:
+        categoria = _normalize(registro.categoria_requerimiento)
+        empresa = registro.empresa_acreditacion.strip()
+        empresa_normalizada = _normalize(registro.empresa_acreditacion)
+
+        logger.debug(
+            "Procesando registro id=%s nombre='%s' categoria='%s' empresa='%s'",
+            registro.id,
+            registro.nombre_trabajador,
+            registro.categoria_requerimiento,
+            registro.empresa_acreditacion,
+        )
+
+        drive_folder_id_trabajador = None
+        drive_folder_id_conductor = None
+        drive_folder_id_final = None
+        id_source = None
+
+        if categoria == "empresa":
+            if not proyecto_drive_resuelto:
+                proyecto_drive_ctx = drive_service.resolve_acreditacion_root(
+                    request.codigo_proyecto
+                )
+                proyecto_drive_resuelto = True
+
+            if not proyecto_drive_ctx:
+                logger.warning(
+                    "No se pudo resolver ruta base de acreditacion para codigo_proyecto=%s",
+                    request.codigo_proyecto,
+                )
+            else:
+                drive_id = proyecto_drive_ctx["drive_id"]
+                id_carpeta_acreditacion = proyecto_drive_ctx["id_carpeta_acreditacion"]
+
+                if empresa_normalizada == "myma":
+                    drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                        "02 MYMA",
+                        id_carpeta_acreditacion,
+                        drive_id,
+                    )
+                    id_source = "drive_empresa"
+                else:
+                    carpeta_externos_id = drive_service.find_folder_exact_or_contains(
+                        "01 Externos",
+                        id_carpeta_acreditacion,
+                        drive_id,
+                    )
+
+                    if not carpeta_externos_id:
+                        logger.warning(
+                            "No se encontro carpeta '01 Externos' para codigo_proyecto=%s",
+                            request.codigo_proyecto,
+                        )
+                    else:
+                        drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                            empresa,
+                            carpeta_externos_id,
+                            drive_id,
+                        )
+                        id_source = "drive_empresa"
+
+                if not drive_folder_id_final:
+                    logger.warning(
+                        "No se encontro carpeta de empresa para registro id=%s empresa='%s'",
+                        registro.id,
+                        empresa,
+                    )
+        else:
+            drive_folder_id_trabajador = (
+                supabase_service.buscar_drive_folder_id_trabajador(
+                    request.codigo_proyecto,
+                    registro.nombre_trabajador,
+                )
+            )
+            drive_folder_id_conductor = supabase_service.buscar_drive_folder_id_conductor(
+                request.codigo_proyecto,
+                registro.nombre_trabajador,
+            )
+            drive_folder_id_final = (
+                drive_folder_id_trabajador or drive_folder_id_conductor
+            )
+
+            if drive_folder_id_trabajador:
+                id_source = "supabase_trabajador"
+            elif drive_folder_id_conductor:
+                id_source = "supabase_conductor"
+
+        actualizado = False
+        if drive_folder_id_final:
+            actualizado = supabase_service.actualizar_brg_acreditacion_solicitud_requerimiento(
+                registro.id,
+                drive_folder_id_final,
+            )
+
+            if actualizado:
+                actualizados_exitosos += 1
+            else:
+                actualizados_fallidos += 1
+        else:
+            sin_drive_folder_id += 1
+
+        if drive_folder_id_final:
+            logger.info(
+                "Registro id=%s actualizado=%s source=%s drive_folder_id=%s",
+                registro.id,
+                actualizado,
+                id_source,
+                drive_folder_id_final,
+            )
+        else:
+            logger.warning(
+                "Registro id=%s sin drive_folder_id categoria='%s' empresa='%s'",
+                registro.id,
+                registro.categoria_requerimiento,
+                registro.empresa_acreditacion,
+            )
+
+        registro_response = RegistroResponse(
+            id=registro.id,
+            nombre_trabajador=registro.nombre_trabajador,
+            drive_folder_id_trabajador=drive_folder_id_trabajador,
+            drive_folder_id_conductor=drive_folder_id_conductor,
+            drive_folder_id_final=drive_folder_id_final,
+            actualizado=actualizado,
+        )
+        registros_procesados.append(registro_response)
+
+    resumen = ResumenActualizacion(
+        total_registros=len(request.registros),
+        actualizados_exitosos=actualizados_exitosos,
+        actualizados_fallidos=actualizados_fallidos,
+        sin_drive_folder_id=sin_drive_folder_id,
+    )
+
+    if actualizados_exitosos == len(request.registros):
+        mensaje = "Todos los registros fueron actualizados exitosamente"
+    elif actualizados_exitosos > 0:
+        mensaje = (
+            f"Se actualizaron {actualizados_exitosos} de {len(request.registros)} registros"
+        )
+    elif sin_drive_folder_id > 0:
+        mensaje = f"No se encontro drive_folder_id para {sin_drive_folder_id} registro(s)"
+    else:
+        mensaje = "No se pudo actualizar ningun registro"
+
+    logger.info(
+        "Proceso completado actualizados=%s fallidos=%s sin_drive_folder_id=%s",
+        actualizados_exitosos,
+        actualizados_fallidos,
+        sin_drive_folder_id,
+    )
+
+    return AsignarFolderResponse(
+        codigo_proyecto=request.codigo_proyecto,
+        registros=registros_procesados,
+        resumen=resumen,
+        mensaje=mensaje,
+    )

@@ -1,29 +1,29 @@
-from dotenv import load_dotenv
+"""Configuracion de la aplicacion."""
 from pydantic_settings import BaseSettings
-
-load_dotenv()
 
 
 class Settings(BaseSettings):
-    """Configuración de la aplicación desde variables de entorno."""
-    
-    # Google Drive
-    google_client_secret_file: str = "client_secret.json"
-    google_token_file: str = "token.json"
-    
-    # Supabase
-    supabase_project_id: str = ""
-    supabase_url: str = ""
-    supabase_key: str = ""
-    
-    # Application
-    environment: str = "development"
-    log_level: str = "INFO"
-    
+    """Configuracion de la aplicacion desde variables de entorno."""
+
+    # Google Drive configuration
+    GOOGLE_CLIENT_SECRET_FILE: str = "client_secret.json"
+    GOOGLE_TOKEN_FILE: str = "token.json"
+
+    # Supabase configuration
+    SUPABASE_PROJECT_ID: str
+    SUPABASE_URL: str
+    SUPABASE_KEY: str
+
+    # Application configuration
+    ENVIRONMENT: str = "development"
+    LOG_LEVEL: str = "INFO"
+    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+
     class Config:
         env_file = ".env"
-        case_sensitive = False
+        case_sensitive = True
+        extra = "ignore"  # Ignore extra keys in .env
 
 
+# Global settings instance
 settings = Settings()
-

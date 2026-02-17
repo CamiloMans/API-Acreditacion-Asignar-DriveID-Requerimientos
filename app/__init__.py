@@ -1,2 +1,2 @@
-# FastAPI Application for Crear Carpetas Solicitud Acreditacion
+"""API para asignar Folder ID a Requerimiento de Solicitud."""
 
