@@ -1,6 +1,7 @@
 # API Asignar Folder ID a Requerimiento
 
-API FastAPI para asignar `drive_folder_id` en `brg_acreditacion_solicitud_requerimiento`.
+API FastAPI para asignar `drive_folder_id` y `parent_drive_id` en
+`brg_acreditacion_solicitud_requerimiento`.
 
 ## Resumen
 
@@ -15,8 +16,12 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
    - Mantiene la logica anterior:
      - busca `drive_folder_id` en `fct_acreditacion_solicitud_trabajador_manual`
      - luego en `fct_acreditacion_solicitud_conductor_manual`
-3. Si encuentra `drive_folder_id`, actualiza `brg_acreditacion_solicitud_requerimiento`.
-4. Si no encuentra, continua con el siguiente registro.
+3. Resuelve `parent_drive_id` una sola vez por request desde el Shared Drive anual
+   `Proyectos YYYY` segun el `codigo_proyecto` (`MY-XXX-YYYY`) y lo reutiliza para
+   todos los registros del payload.
+4. Si encuentra `drive_folder_id`, actualiza `drive_folder_id` y `parent_drive_id`.
+5. Si no encuentra `drive_folder_id`, continua con el siguiente registro y, cuando
+   existe, igual persiste `parent_drive_id`.
 
 Notas de matching:
 - Comparaciones de categoria y empresa: `trim + case-insensitive`.
@@ -89,6 +94,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```json
 {
   "codigo_proyecto": "MY-000-2026",
+  "parent_drive_id": "1parent...",
   "registros": [
     {
       "id": 1,
@@ -129,6 +135,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 Se registran:
 - categoria y empresa por registro
+- `parent_drive_id` resuelto para el request (si aplica)
 - origen del ID (`drive_empresa`, `supabase_trabajador`, `supabase_conductor`)
 - casos donde no se encuentra carpeta o `drive_folder_id`
 

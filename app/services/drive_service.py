@@ -71,6 +71,20 @@ class DriveService:
                     time.sleep(wait_time)
                     continue
                 raise
+            except Exception as error:
+                if attempt < max_retries - 1:
+                    wait_time = 2 ** attempt
+                    logger.warning(
+                        "Google Drive API error transitorio: %s. Reintentando en %ss "
+                        "(intento %s/%s)",
+                        error,
+                        wait_time,
+                        attempt + 1,
+                        max_retries,
+                    )
+                    time.sleep(wait_time)
+                    continue
+                raise
 
     def find_shared_drive_by_name(self, drive_name: str) -> Optional[str]:
         """Busca un Shared Drive por nombre y retorna su ID."""
@@ -237,14 +251,14 @@ class DriveService:
             return exact_id
         return self.find_folder_containing_name(folder_name, parent_id, drive_id)
 
-    def resolve_acreditacion_root(self, codigo_proyecto: str) -> Optional[Dict[str, str]]:
+    def resolve_parent_drive_context(self, codigo_proyecto: str) -> Optional[Dict[str, str]]:
         """
-        Resuelve IDs para:
-        Proyectos YYYY -> MY-XXX-YYYY -> 08 Terrenos -> 03 Acreditacion y Arranque -> 01 Acreditacion
+        Resuelve el Shared Drive anual:
+        codigo_proyecto MY-XXX-YYYY -> Shared Drive Proyectos YYYY
         """
         match = re.match(r"^MY-\d{3}-(\d{4})$", codigo_proyecto)
         if not match:
-            logger.error(
+            logger.warning(
                 "codigo_proyecto '%s' no cumple formato esperado MY-XXX-YYYY",
                 codigo_proyecto,
             )
@@ -252,11 +266,36 @@ class DriveService:
 
         year = match.group(1)
         drive_name = f"Proyectos {year}"
-        drive_id = self.find_shared_drive_by_name(drive_name)
-        if not drive_id:
+        parent_drive_id = self.find_shared_drive_by_name(drive_name)
+        if not parent_drive_id:
             logger.error("No se encontro Shared Drive '%s'", drive_name)
             return None
 
+        return {
+            "parent_drive_id": parent_drive_id,
+            "drive_name": drive_name,
+            "year": year,
+        }
+
+    def resolve_acreditacion_root(
+        self,
+        codigo_proyecto: str,
+        parent_ctx: Optional[Dict[str, str]] = None,
+    ) -> Optional[Dict[str, str]]:
+        """
+        Resuelve IDs para:
+        Proyectos YYYY -> MY-XXX-YYYY -> 08 Terrenos -> 03 Acreditacion y Arranque -> 01 Acreditacion
+
+        Si se recibe parent_ctx, reutiliza ese contexto anual ya resuelto para evitar
+        consultas duplicadas al resolver el Shared Drive.
+        """
+        resolved_parent_ctx = parent_ctx or self.resolve_parent_drive_context(codigo_proyecto)
+        if not resolved_parent_ctx:
+            return None
+
+        drive_id = resolved_parent_ctx["parent_drive_id"]
+        year = resolved_parent_ctx["year"]
+        drive_name = resolved_parent_ctx["drive_name"]
         current_parent = drive_id
         route_candidates = [
             [codigo_proyecto],

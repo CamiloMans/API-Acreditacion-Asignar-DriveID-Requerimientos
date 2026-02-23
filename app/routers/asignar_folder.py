@@ -45,6 +45,20 @@ async def asignar_folder(request: AsignarFolderRequest):
     actualizados_fallidos = 0
     sin_drive_folder_id = 0
 
+    parent_ctx = drive_service.resolve_parent_drive_context(request.codigo_proyecto)
+    parent_drive_id = parent_ctx["parent_drive_id"] if parent_ctx else None
+    if parent_drive_id:
+        logger.info(
+            "parent_drive_id resuelto para codigo_proyecto=%s: %s",
+            request.codigo_proyecto,
+            parent_drive_id,
+        )
+    else:
+        logger.warning(
+            "No se pudo resolver parent_drive_id para codigo_proyecto=%s",
+            request.codigo_proyecto,
+        )
+
     # Cache por request para evitar recalcular ruta del proyecto en cada registro Empresa.
     proyecto_drive_ctx = None
     proyecto_drive_resuelto = False
@@ -70,9 +84,21 @@ async def asignar_folder(request: AsignarFolderRequest):
         if categoria == "empresa":
             if not proyecto_drive_resuelto:
                 proyecto_drive_ctx = drive_service.resolve_acreditacion_root(
-                    request.codigo_proyecto
+                    request.codigo_proyecto,
+                    parent_ctx=parent_ctx,
                 )
                 proyecto_drive_resuelto = True
+                if proyecto_drive_ctx and not parent_drive_id:
+                    # Recupera parent_drive_id cuando la primera resolucion anual falla
+                    # pero la ruta de acreditacion se logra resolver despues.
+                    parent_drive_id = proyecto_drive_ctx.get("drive_id")
+                    if parent_drive_id:
+                        logger.info(
+                            "parent_drive_id recuperado desde resolve_acreditacion_root "
+                            "para codigo_proyecto=%s: %s",
+                            request.codigo_proyecto,
+                            parent_drive_id,
+                        )
 
             if not proyecto_drive_ctx:
                 logger.warning(
@@ -140,7 +166,8 @@ async def asignar_folder(request: AsignarFolderRequest):
         if drive_folder_id_final:
             actualizado = supabase_service.actualizar_brg_acreditacion_solicitud_requerimiento(
                 registro.id,
-                drive_folder_id_final,
+                drive_folder_id=drive_folder_id_final,
+                parent_drive_id=parent_drive_id,
             )
 
             if actualizado:
@@ -149,6 +176,18 @@ async def asignar_folder(request: AsignarFolderRequest):
                 actualizados_fallidos += 1
         else:
             sin_drive_folder_id += 1
+            if parent_drive_id:
+                parent_actualizado = (
+                    supabase_service.actualizar_brg_acreditacion_solicitud_requerimiento(
+                        registro.id,
+                        parent_drive_id=parent_drive_id,
+                    )
+                )
+                if not parent_actualizado:
+                    logger.warning(
+                        "No se pudo actualizar parent_drive_id para registro id=%s",
+                        registro.id,
+                    )
 
         if drive_folder_id_final:
             logger.info(
@@ -203,6 +242,7 @@ async def asignar_folder(request: AsignarFolderRequest):
 
     return AsignarFolderResponse(
         codigo_proyecto=request.codigo_proyecto,
+        parent_drive_id=parent_drive_id,
         registros=registros_procesados,
         resumen=resumen,
         mensaje=mensaje,

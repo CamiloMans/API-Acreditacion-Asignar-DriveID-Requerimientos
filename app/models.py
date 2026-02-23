@@ -55,7 +55,12 @@ class ResumenActualizacion(BaseModel):
 class AsignarFolderResponse(BaseModel):
     """Modelo para el response de asignar folder ID."""
     codigo_proyecto: str = Field(..., description="Código del proyecto")
+    parent_drive_id: Optional[str] = Field(
+        None,
+        description="ID del Shared Drive anual Proyectos YYYY",
+    )
     registros: List[RegistroResponse] = Field(..., description="Lista de registros procesados")
     resumen: ResumenActualizacion = Field(..., description="Resumen de actualizaciones")
     mensaje: str = Field(..., description="Mensaje del resultado")
+
 
