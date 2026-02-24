@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     # Application configuration
     ENVIRONMENT: str = "development"
     LOG_LEVEL: str = "INFO"
-    CORS_ORIGINS: str = "http://localhost:3000,http://127.0.0.1:3000"
+    CORS_ORIGINS: str = "https://myma-acreditacion.onrender.com,http://localhost:3000,http://127.0.0.1:3000"
 
     class Config:
         env_file = ".env"
