@@ -13,9 +13,14 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
    - Base de ruta:
      `Proyectos YYYY -> MY-XXX-YYYY -> 08 Terrenos -> 03 Acreditación y Arranque -> 01 Acreditación`.
 2. Si `categoria_requerimiento != "Empresa"`:
-   - Mantiene la logica anterior:
+   - Si es categoria de vehiculo (`vehiculo`, `vehiculos`, `vehículo`, `vehículos`):
+     - no exige `nombre_trabajador`
+     - exige `patente_vehiculo`
+     - busca `drive_folder_id` en `fct_acreditacion_solicitud_vehiculos` por `id_proyecto + patente`
+   - Para otras categorias no Empresa:
      - busca `drive_folder_id` en `fct_acreditacion_solicitud_trabajador_manual`
      - luego en `fct_acreditacion_solicitud_conductor_manual`
+     - luego en `fct_acreditacion_solicitud_vehiculos` si el registro incluye `patente_vehiculo`
 3. Resuelve `parent_drive_id` una sola vez por request desde el Shared Drive anual
    `Proyectos YYYY` segun el `codigo_proyecto` (`MY-XXX-YYYY`) y lo reutiliza para
    todos los registros del payload.
@@ -25,6 +30,7 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
 
 Notas de matching:
 - Comparaciones de categoria y empresa: `trim + case-insensitive`.
+- Patente de vehiculo: `trim` + match exacto en Supabase (sin normalizar formato).
 - Busqueda de carpetas en Drive: primero exacta, luego por `contains`.
 - Este flujo no crea carpetas nuevas en Drive.
 
@@ -65,6 +71,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 
 ```json
 {
+  "id_proyecto": 123,
   "codigo_proyecto": "MY-000-2026",
   "registros": [
     {
@@ -83,11 +90,24 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
       "id": 3,
       "categoria_requerimiento": "Persona",
       "empresa_acreditacion": "AGQ",
-      "nombre_trabajador": "Diego Soto"
+      "nombre_trabajador": "Diego Soto",
+      "patente_vehiculo": "XZ99AA"
+    },
+    {
+      "id": 4,
+      "categoria_requerimiento": "Vehículos",
+      "empresa_acreditacion": "AGQ",
+      "nombre_trabajador": null,
+      "patente_vehiculo": "ABCD12"
     }
   ]
 }
 ```
+
+Notas del request:
+- `id_proyecto` es obligatorio si existe al menos un registro de vehiculo o si algun registro incluye `patente_vehiculo`.
+- `nombre_trabajador` es obligatorio para categorias distintas de `Empresa` y vehiculo.
+- `patente_vehiculo` es obligatoria para categorias de vehiculo.
 
 #### Response (ejemplo)
 
@@ -101,6 +121,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
       "nombre_trabajador": "Alan Flores",
       "drive_folder_id_trabajador": null,
       "drive_folder_id_conductor": null,
+      "drive_folder_id_vehiculo": null,
       "drive_folder_id_final": "1abc...",
       "actualizado": true
     },
@@ -109,6 +130,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
       "nombre_trabajador": "Pedro Diaz",
       "drive_folder_id_trabajador": null,
       "drive_folder_id_conductor": null,
+      "drive_folder_id_vehiculo": null,
       "drive_folder_id_final": "1def...",
       "actualizado": true
     },
@@ -117,13 +139,23 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
       "nombre_trabajador": "Diego Soto",
       "drive_folder_id_trabajador": "1xyz...",
       "drive_folder_id_conductor": null,
+      "drive_folder_id_vehiculo": null,
       "drive_folder_id_final": "1xyz...",
+      "actualizado": true
+    },
+    {
+      "id": 4,
+      "nombre_trabajador": null,
+      "drive_folder_id_trabajador": null,
+      "drive_folder_id_conductor": null,
+      "drive_folder_id_vehiculo": "1veh...",
+      "drive_folder_id_final": "1veh...",
       "actualizado": true
     }
   ],
   "resumen": {
-    "total_registros": 3,
-    "actualizados_exitosos": 3,
+    "total_registros": 4,
+    "actualizados_exitosos": 4,
     "actualizados_fallidos": 0,
     "sin_drive_folder_id": 0
   },
@@ -136,7 +168,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Se registran:
 - categoria y empresa por registro
 - `parent_drive_id` resuelto para el request (si aplica)
-- origen del ID (`drive_empresa`, `supabase_trabajador`, `supabase_conductor`)
+- origen del ID (`drive_empresa`, `supabase_trabajador`, `supabase_conductor`, `supabase_vehiculo`)
 - casos donde no se encuentra carpeta o `drive_folder_id`
 
 ## Estructura

@@ -566,3 +566,315 @@ def test_asignar_folder_recupera_parent_desde_acreditacion(monkeypatch) -> None:
     assert len(update_calls) == 2
     assert update_calls[0]["parent_drive_id"] == "drive-123"
     assert update_calls[1]["parent_drive_id"] == "drive-123"
+
+
+def test_asignar_folder_categoria_vehiculos_busca_por_patente(monkeypatch) -> None:
+    def mock_buscar_vehiculo(id_proyecto: int, patente_vehiculo: str) -> Optional[str]:
+        assert id_proyecto == 123
+        assert patente_vehiculo == "ABCD12"
+        return "folder-veh-001"
+
+    def mock_actualizar(
+        registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        assert registro_id == 10
+        assert drive_folder_id == "folder-veh-001"
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent_drive_context,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_vehiculo",
+        mock_buscar_vehiculo,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "id_proyecto": 123,
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 10,
+                "categoria_requerimiento": "Vehículos",
+                "empresa_acreditacion": "AGQ",
+                "nombre_trabajador": None,
+                "patente_vehiculo": "  ABCD12  ",
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resumen"]["actualizados_exitosos"] == 1
+    assert body["registros"][0]["drive_folder_id_vehiculo"] == "folder-veh-001"
+    assert body["registros"][0]["drive_folder_id_final"] == "folder-veh-001"
+    assert body["registros"][0]["nombre_trabajador"] is None
+
+
+def test_asignar_folder_categoria_vehiculo_sin_patente_devuelve_422() -> None:
+    payload = {
+        "id_proyecto": 123,
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 11,
+                "categoria_requerimiento": "Vehiculo",
+                "empresa_acreditacion": "AGQ",
+                "nombre_trabajador": None,
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 422
+
+
+def test_asignar_folder_no_empresa_sin_nombre_trabajador_devuelve_422() -> None:
+    payload = {
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 12,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "AGQ",
+                "nombre_trabajador": None,
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 422
+
+
+def test_asignar_folder_vehiculo_sin_id_proyecto_devuelve_422() -> None:
+    payload = {
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 13,
+                "categoria_requerimiento": "Vehiculos",
+                "empresa_acreditacion": "AGQ",
+                "patente_vehiculo": "ABCD12",
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 422
+
+
+def test_asignar_folder_fallback_a_vehiculo_si_no_hay_trabajador_ni_conductor(monkeypatch) -> None:
+    def mock_buscar_trabajador(_codigo_proyecto: str, _nombre_trabajador: str) -> Optional[str]:
+        return None
+
+    def mock_buscar_conductor(_codigo_proyecto: str, _nombre_trabajador: str) -> Optional[str]:
+        return None
+
+    def mock_buscar_vehiculo(id_proyecto: int, patente_vehiculo: str) -> Optional[str]:
+        assert id_proyecto == 123
+        assert patente_vehiculo == "XZ99AA"
+        return "folder-veh-fallback"
+
+    def mock_actualizar(
+        registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        assert registro_id == 14
+        assert drive_folder_id == "folder-veh-fallback"
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent_drive_context,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_trabajador",
+        mock_buscar_trabajador,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_conductor",
+        mock_buscar_conductor,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_vehiculo",
+        mock_buscar_vehiculo,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "id_proyecto": 123,
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 14,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "AGQ",
+                "nombre_trabajador": "Diego Soto",
+                "patente_vehiculo": "XZ99AA",
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registros"][0]["drive_folder_id_trabajador"] is None
+    assert body["registros"][0]["drive_folder_id_conductor"] is None
+    assert body["registros"][0]["drive_folder_id_vehiculo"] == "folder-veh-fallback"
+    assert body["registros"][0]["drive_folder_id_final"] == "folder-veh-fallback"
+
+
+def test_asignar_folder_prioriza_trabajador_sobre_vehiculo(monkeypatch) -> None:
+    def mock_buscar_trabajador(_codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
+        assert nombre_trabajador == "Diego Soto"
+        return "folder-trab-priority"
+
+    def mock_buscar_conductor(_codigo_proyecto: str, _nombre_trabajador: str) -> Optional[str]:
+        return None
+
+    def mock_buscar_vehiculo(_id_proyecto: int, _patente_vehiculo: str) -> Optional[str]:
+        raise AssertionError("No debe consultar vehiculo si ya encontro trabajador")
+
+    def mock_actualizar(
+        registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        assert registro_id == 15
+        assert drive_folder_id == "folder-trab-priority"
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent_drive_context,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_trabajador",
+        mock_buscar_trabajador,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_conductor",
+        mock_buscar_conductor,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_vehiculo",
+        mock_buscar_vehiculo,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "id_proyecto": 123,
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 15,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "AGQ",
+                "nombre_trabajador": "Diego Soto",
+                "patente_vehiculo": "ZZ11ZZ",
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["registros"][0]["drive_folder_id_trabajador"] == "folder-trab-priority"
+    assert body["registros"][0]["drive_folder_id_vehiculo"] is None
+    assert body["registros"][0]["drive_folder_id_final"] == "folder-trab-priority"
+
+
+def test_asignar_folder_vehiculo_sin_match_actualiza_solo_parent(monkeypatch) -> None:
+    update_calls: List[Dict[str, Any]] = []
+
+    def mock_buscar_vehiculo(id_proyecto: int, patente_vehiculo: str) -> Optional[str]:
+        assert id_proyecto == 123
+        assert patente_vehiculo == "NOPE01"
+        return None
+
+    def mock_actualizar(
+        registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        update_calls.append(
+            {
+                "registro_id": registro_id,
+                "drive_folder_id": drive_folder_id,
+                "parent_drive_id": parent_drive_id,
+            }
+        )
+        assert registro_id == 16
+        assert drive_folder_id is None
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent_drive_context,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_vehiculo",
+        mock_buscar_vehiculo,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "id_proyecto": 123,
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 16,
+                "categoria_requerimiento": "Vehiculo",
+                "empresa_acreditacion": "AGQ",
+                "patente_vehiculo": "NOPE01",
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["resumen"]["actualizados_exitosos"] == 0
+    assert body["resumen"]["sin_drive_folder_id"] == 1
+    assert body["registros"][0]["drive_folder_id_vehiculo"] is None
+    assert body["registros"][0]["drive_folder_id_final"] is None
+    assert body["registros"][0]["actualizado"] is False
+    assert len(update_calls) == 1

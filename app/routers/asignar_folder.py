@@ -8,6 +8,7 @@ from app.models import (
     AsignarFolderResponse,
     RegistroResponse,
     ResumenActualizacion,
+    _is_categoria_vehiculo,
 )
 from app.services.drive_service import drive_service
 from app.services.supabase_service import supabase_service
@@ -22,6 +23,11 @@ def _normalize(value: str) -> str:
     return value.strip().lower()
 
 
+def _es_categoria_vehiculo(value: str) -> bool:
+    """Determina si una categoria corresponde al flujo de vehiculos."""
+    return _is_categoria_vehiculo(value)
+
+
 @router.post("", response_model=AsignarFolderResponse)
 async def asignar_folder(request: AsignarFolderRequest):
     """
@@ -32,7 +38,7 @@ async def asignar_folder(request: AsignarFolderRequest):
       - empresa_acreditacion == Myma -> carpeta 02 MYMA bajo 01 Acreditacion
       - otra empresa -> carpeta 01 Externos, luego carpeta de la empresa
     - categoria_requerimiento != Empresa:
-      - se mantiene flujo actual por Supabase (trabajador/conductor)
+      - flujo Supabase prioriza trabajador, conductor y luego vehiculo
     """
     logger.info(
         "Procesando asignacion de folder para proyecto=%s registros=%s",
@@ -65,6 +71,7 @@ async def asignar_folder(request: AsignarFolderRequest):
 
     for registro in request.registros:
         categoria = _normalize(registro.categoria_requerimiento)
+        es_categoria_vehiculo = _es_categoria_vehiculo(registro.categoria_requerimiento)
         empresa = registro.empresa_acreditacion.strip()
         empresa_normalizada = _normalize(registro.empresa_acreditacion)
 
@@ -78,6 +85,7 @@ async def asignar_folder(request: AsignarFolderRequest):
 
         drive_folder_id_trabajador = None
         drive_folder_id_conductor = None
+        drive_folder_id_vehiculo = None
         drive_folder_id_final = None
         id_source = None
 
@@ -143,24 +151,48 @@ async def asignar_folder(request: AsignarFolderRequest):
                         empresa,
                     )
         else:
-            drive_folder_id_trabajador = (
-                supabase_service.buscar_drive_folder_id_trabajador(
+            if es_categoria_vehiculo:
+                drive_folder_id_vehiculo = supabase_service.buscar_drive_folder_id_vehiculo(
+                    request.id_proyecto,
+                    registro.patente_vehiculo,
+                )
+                drive_folder_id_final = drive_folder_id_vehiculo
+                if drive_folder_id_vehiculo:
+                    id_source = "supabase_vehiculo"
+            else:
+                drive_folder_id_trabajador = (
+                    supabase_service.buscar_drive_folder_id_trabajador(
+                        request.codigo_proyecto,
+                        registro.nombre_trabajador,
+                    )
+                )
+                drive_folder_id_conductor = supabase_service.buscar_drive_folder_id_conductor(
                     request.codigo_proyecto,
                     registro.nombre_trabajador,
                 )
-            )
-            drive_folder_id_conductor = supabase_service.buscar_drive_folder_id_conductor(
-                request.codigo_proyecto,
-                registro.nombre_trabajador,
-            )
-            drive_folder_id_final = (
-                drive_folder_id_trabajador or drive_folder_id_conductor
-            )
+                drive_folder_id_final = (
+                    drive_folder_id_trabajador or drive_folder_id_conductor
+                )
 
-            if drive_folder_id_trabajador:
-                id_source = "supabase_trabajador"
-            elif drive_folder_id_conductor:
-                id_source = "supabase_conductor"
+                if drive_folder_id_trabajador:
+                    id_source = "supabase_trabajador"
+                elif drive_folder_id_conductor:
+                    id_source = "supabase_conductor"
+
+                if (
+                    not drive_folder_id_final
+                    and registro.patente_vehiculo
+                    and request.id_proyecto is not None
+                ):
+                    drive_folder_id_vehiculo = (
+                        supabase_service.buscar_drive_folder_id_vehiculo(
+                            request.id_proyecto,
+                            registro.patente_vehiculo,
+                        )
+                    )
+                    if drive_folder_id_vehiculo:
+                        drive_folder_id_final = drive_folder_id_vehiculo
+                        id_source = "supabase_vehiculo"
 
         actualizado = False
         if drive_folder_id_final:
@@ -210,6 +242,7 @@ async def asignar_folder(request: AsignarFolderRequest):
             nombre_trabajador=registro.nombre_trabajador,
             drive_folder_id_trabajador=drive_folder_id_trabajador,
             drive_folder_id_conductor=drive_folder_id_conductor,
+            drive_folder_id_vehiculo=drive_folder_id_vehiculo,
             drive_folder_id_final=drive_folder_id_final,
             actualizado=actualizado,
         )

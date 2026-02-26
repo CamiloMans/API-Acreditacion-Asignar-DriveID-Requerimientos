@@ -116,6 +116,57 @@ class SupabaseService:
             )
             return None
 
+    def buscar_drive_folder_id_vehiculo(
+        self,
+        id_proyecto: int,
+        patente_vehiculo: str,
+    ) -> Optional[str]:
+        """
+        Busca el drive_folder_id en fct_acreditacion_solicitud_vehiculos.
+
+        Args:
+            id_proyecto: ID del proyecto
+            patente_vehiculo: Patente del vehiculo
+
+        Returns:
+            drive_folder_id si se encuentra, None si no
+        """
+        patente_normalizada = patente_vehiculo.strip()
+        try:
+            response = (
+                self.client.table("fct_acreditacion_solicitud_vehiculos")
+                .select("drive_folder_id")
+                .eq("id_proyecto", id_proyecto)
+                .eq("patente", patente_normalizada)
+                .limit(1)
+                .execute()
+            )
+
+            if response.data and len(response.data) > 0:
+                drive_folder_id = response.data[0].get("drive_folder_id")
+                logger.info(
+                    "Encontrado drive_folder_id en vehiculo: proyecto=%s patente=%s -> %s",
+                    id_proyecto,
+                    patente_normalizada,
+                    drive_folder_id,
+                )
+                return drive_folder_id
+
+            logger.debug(
+                "No se encontro drive_folder_id en vehiculo para: proyecto=%s patente=%s",
+                id_proyecto,
+                patente_normalizada,
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                "Error buscando drive_folder_id en vehiculo para proyecto=%s patente=%s: %s",
+                id_proyecto,
+                patente_normalizada,
+                e,
+            )
+            return None
+
     def actualizar_brg_acreditacion_solicitud_requerimiento(
         self,
         registro_id: int,
