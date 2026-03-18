@@ -25,7 +25,7 @@ client = TestClient(app)
 
 DEFAULT_PARENT_CTX = {
     "parent_drive_id": "drive-123",
-    "drive_name": "Proyectos 2026",
+    "drive_name": "Acreditaciones",
     "year": "2026",
 }
 
@@ -60,20 +60,26 @@ def test_asignar_folder_empresa_myma(monkeypatch) -> None:
         assert parent_ctx == DEFAULT_PARENT_CTX
         return {
             "drive_id": "drive-123",
-            "id_carpeta_acreditacion": "acreditacion-456",
+            "id_carpeta_acreditacion": "proyecto-456",
             "codigo_proyecto": codigo_proyecto,
             "year": "2026",
-            "drive_name": "Proyectos 2026",
+            "drive_name": "Acreditaciones",
         }
 
     def mock_find_folder_exact_or_contains(
         folder_name: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
-        if folder_name == "02 MYMA":
-            assert parent_id == "acreditacion-456"
+        if folder_name == "MYMA":
+            assert parent_id == "proyecto-456"
             assert drive_id == "drive-123"
+            return "myma-789"
+        if folder_name == "01 Empresa":
+            assert parent_id == "myma-789"
+            assert drive_id == "drive-123"
+            assert ignore_numeric_prefix is True
             return "folder-myma-001"
         return None
 
@@ -129,6 +135,206 @@ def test_asignar_folder_empresa_myma(monkeypatch) -> None:
     assert body["resumen"]["sin_drive_folder_id"] == 0
     assert body["registros"][0]["drive_folder_id_final"] == "folder-myma-001"
     assert body["registros"][0]["actualizado"] is True
+
+
+def test_asignar_folder_empresa_externa_busca_01_empresa(monkeypatch) -> None:
+    def mock_resolve_acreditacion_root(
+        codigo_proyecto: str,
+        parent_ctx: Optional[Dict[str, str]] = None,
+    ):
+        assert codigo_proyecto == "MY-000-2026"
+        assert parent_ctx == DEFAULT_PARENT_CTX
+        return {
+            "drive_id": "drive-123",
+            "id_carpeta_acreditacion": "proyecto-456",
+            "codigo_proyecto": codigo_proyecto,
+            "year": "2026",
+            "drive_name": "Acreditaciones",
+        }
+
+    def mock_find_folder_exact_or_contains(
+        folder_name: str,
+        parent_id: str,
+        drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
+    ) -> Optional[str]:
+        if folder_name == "Externos":
+            assert parent_id == "proyecto-456"
+            assert drive_id == "drive-123"
+            return "externos-001"
+        if folder_name == "NLT":
+            assert parent_id == "externos-001"
+            assert drive_id == "drive-123"
+            return "empresa-nlt-001"
+        if folder_name == "01 Empresa":
+            assert parent_id == "empresa-nlt-001"
+            assert drive_id == "drive-123"
+            assert ignore_numeric_prefix is True
+            return "folder-nlt-empresa-001"
+        return None
+
+    def mock_actualizar(
+        registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        assert registro_id == 2
+        assert drive_folder_id == "folder-nlt-empresa-001"
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent_drive_context,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_acreditacion_root",
+        mock_resolve_acreditacion_root,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "find_folder_exact_or_contains",
+        mock_find_folder_exact_or_contains,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 2,
+                "categoria_requerimiento": "Empresa",
+                "empresa_acreditacion": "NLT",
+                "nombre_trabajador": None,
+            }
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+    assert body["parent_drive_id"] == "drive-123"
+    assert body["resumen"]["actualizados_exitosos"] == 1
+    assert body["resumen"]["sin_drive_folder_id"] == 0
+    assert body["registros"][0]["drive_folder_id_final"] == "folder-nlt-empresa-001"
+
+
+def test_drive_service_resolve_parent_drive_context_usa_acreditaciones(monkeypatch) -> None:
+    def mock_find_shared_drive_by_name(drive_name: str) -> Optional[str]:
+        assert drive_name == "Acreditaciones"
+        return "drive-acreditaciones"
+
+    monkeypatch.setattr(
+        drive_service,
+        "find_shared_drive_by_name",
+        mock_find_shared_drive_by_name,
+    )
+
+    result = drive_service.resolve_parent_drive_context("MY-000-2026")
+    assert result is not None
+    assert result["parent_drive_id"] == "drive-acreditaciones"
+    assert result["drive_name"] == "Acreditaciones"
+    assert result["year"] == "2026"
+
+
+def test_drive_service_resolve_acreditacion_root_con_ruta_nueva(monkeypatch) -> None:
+    def mock_resolve_parent(_codigo_proyecto: str) -> Dict[str, str]:
+        return {
+            "parent_drive_id": "drive-acreditaciones",
+            "drive_name": "Acreditaciones",
+            "year": "2026",
+        }
+
+    def mock_find_folder_exact_or_contains(
+        folder_name: str,
+        parent_id: str,
+        drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
+    ) -> Optional[str]:
+        assert drive_id == "drive-acreditaciones"
+        assert ignore_numeric_prefix is False
+        if folder_name == "Acreditaciones":
+            assert parent_id == "drive-acreditaciones"
+            return "acreditaciones-root"
+        if folder_name == "Proyectos 2026":
+            assert parent_id == "acreditaciones-root"
+            return "proyectos-2026"
+        if folder_name == "MY-000-2026":
+            assert parent_id == "proyectos-2026"
+            return "my-000-2026"
+        return None
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "find_folder_exact_or_contains",
+        mock_find_folder_exact_or_contains,
+    )
+
+    result = drive_service.resolve_acreditacion_root("MY-000-2026")
+    assert result is not None
+    assert result["drive_id"] == "drive-acreditaciones"
+    assert result["id_carpeta_acreditaciones"] == "acreditaciones-root"
+    assert result["id_carpeta_proyectos_anio"] == "proyectos-2026"
+    assert result["id_carpeta_proyecto"] == "my-000-2026"
+    assert result["id_carpeta_acreditacion"] == "my-000-2026"
+
+
+def test_drive_service_find_folder_normaliza_y_ignora_prefijo_numerico(monkeypatch) -> None:
+    def mock_find_folder_by_name_in_directory(
+        _folder_name: str,
+        _parent_id: str,
+        _drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
+    ) -> Optional[str]:
+        _ = ignore_numeric_prefix
+        return None
+
+    def mock_list_folders_in_directory(
+        _parent_id: str,
+        _drive_id: Optional[str] = None,
+        _max_results: int = 1000,
+    ) -> List[Any]:
+        return [
+            ("01 Empreśa", "folder-empresa-001"),
+            ("nlt", "folder-nlt-001"),
+        ]
+
+    monkeypatch.setattr(
+        drive_service,
+        "find_folder_by_name_in_directory",
+        mock_find_folder_by_name_in_directory,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "list_folders_in_directory",
+        mock_list_folders_in_directory,
+    )
+
+    empresa_folder = drive_service.find_folder_exact_or_contains(
+        "01 Empresa",
+        "parent-001",
+        "drive-001",
+        ignore_numeric_prefix=True,
+    )
+    contratista_folder = drive_service.find_folder_exact_or_contains(
+        "NLT",
+        "parent-001",
+        "drive-001",
+    )
+
+    assert empresa_folder == "folder-empresa-001"
+    assert contratista_folder == "folder-nlt-001"
 
 
 def test_asignar_folder_no_empresa_prioriza_trabajador(monkeypatch) -> None:
@@ -347,20 +553,26 @@ def test_asignar_folder_request_mixto_comparte_parent(monkeypatch) -> None:
         assert parent_ctx == DEFAULT_PARENT_CTX
         return {
             "drive_id": "drive-123",
-            "id_carpeta_acreditacion": "acreditacion-456",
+            "id_carpeta_acreditacion": "proyecto-456",
             "codigo_proyecto": codigo_proyecto,
             "year": "2026",
-            "drive_name": "Proyectos 2026",
+            "drive_name": "Acreditaciones",
         }
 
     def mock_find_folder_exact_or_contains(
         folder_name: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
-        if folder_name == "02 MYMA":
-            assert parent_id == "acreditacion-456"
+        if folder_name == "MYMA":
+            assert parent_id == "proyecto-456"
             assert drive_id == "drive-123"
+            return "myma-789"
+        if folder_name == "01 Empresa":
+            assert parent_id == "myma-789"
+            assert drive_id == "drive-123"
+            assert ignore_numeric_prefix is True
             return "folder-myma-001"
         return None
 
@@ -472,20 +684,26 @@ def test_asignar_folder_recupera_parent_desde_acreditacion(monkeypatch) -> None:
         assert parent_ctx is None
         return {
             "drive_id": "drive-123",
-            "id_carpeta_acreditacion": "acreditacion-456",
+            "id_carpeta_acreditacion": "proyecto-456",
             "codigo_proyecto": codigo_proyecto,
             "year": "2026",
-            "drive_name": "Proyectos 2026",
+            "drive_name": "Acreditaciones",
         }
 
     def mock_find_folder_exact_or_contains(
         folder_name: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
-        if folder_name == "02 MYMA":
-            assert parent_id == "acreditacion-456"
+        if folder_name == "MYMA":
+            assert parent_id == "proyecto-456"
             assert drive_id == "drive-123"
+            return "myma-789"
+        if folder_name == "01 Empresa":
+            assert parent_id == "myma-789"
+            assert drive_id == "drive-123"
+            assert ignore_numeric_prefix is True
             return "folder-myma-001"
         return None
 

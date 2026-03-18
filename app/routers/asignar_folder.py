@@ -35,8 +35,8 @@ async def asignar_folder(request: AsignarFolderRequest):
 
     Reglas:
     - categoria_requerimiento == Empresa:
-      - empresa_acreditacion == Myma -> carpeta 02 MYMA bajo 01 Acreditacion
-      - otra empresa -> carpeta 01 Externos, luego carpeta de la empresa
+      - empresa_acreditacion == Myma -> MYMA/01 Empresa
+      - otra empresa -> Externos/<empresa>/01 Empresa
     - categoria_requerimiento != Empresa:
       - flujo Supabase prioriza trabajador, conductor y luego vehiculo
     """
@@ -115,34 +115,59 @@ async def asignar_folder(request: AsignarFolderRequest):
                 )
             else:
                 drive_id = proyecto_drive_ctx["drive_id"]
-                id_carpeta_acreditacion = proyecto_drive_ctx["id_carpeta_acreditacion"]
+                id_carpeta_proyecto = proyecto_drive_ctx["id_carpeta_acreditacion"]
 
                 if empresa_normalizada == "myma":
-                    drive_folder_id_final = drive_service.find_folder_exact_or_contains(
-                        "02 MYMA",
-                        id_carpeta_acreditacion,
+                    carpeta_myma_id = drive_service.find_folder_exact_or_contains(
+                        "MYMA",
+                        id_carpeta_proyecto,
                         drive_id,
                     )
-                    id_source = "drive_empresa"
+                    if not carpeta_myma_id:
+                        logger.warning(
+                            "No se encontro carpeta 'MYMA' para codigo_proyecto=%s",
+                            request.codigo_proyecto,
+                        )
+                    else:
+                        drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                            "01 Empresa",
+                            carpeta_myma_id,
+                            drive_id,
+                            ignore_numeric_prefix=True,
+                        )
+                        id_source = "drive_empresa"
                 else:
                     carpeta_externos_id = drive_service.find_folder_exact_or_contains(
-                        "01 Externos",
-                        id_carpeta_acreditacion,
+                        "Externos",
+                        id_carpeta_proyecto,
                         drive_id,
                     )
 
                     if not carpeta_externos_id:
                         logger.warning(
-                            "No se encontro carpeta '01 Externos' para codigo_proyecto=%s",
+                            "No se encontro carpeta 'Externos' para codigo_proyecto=%s",
                             request.codigo_proyecto,
                         )
                     else:
-                        drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                        carpeta_empresa_id = drive_service.find_folder_exact_or_contains(
                             empresa,
                             carpeta_externos_id,
                             drive_id,
                         )
-                        id_source = "drive_empresa"
+                        if not carpeta_empresa_id:
+                            logger.warning(
+                                "No se encontro carpeta de contratista '%s' en Externos para codigo_proyecto=%s",
+                                empresa,
+                                request.codigo_proyecto,
+                            )
+                        else:
+                            drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                                "01 Empresa",
+                                carpeta_empresa_id,
+                                drive_id,
+                                ignore_numeric_prefix=True,
+                            )
+                            id_source = "drive_empresa"
 
                 if not drive_folder_id_final:
                     logger.warning(

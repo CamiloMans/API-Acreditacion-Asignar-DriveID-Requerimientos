@@ -3,6 +3,7 @@ import logging
 import os
 import re
 import time
+import unicodedata
 from typing import Dict, List, Optional, Tuple
 
 from google.auth.transport.requests import Request
@@ -16,6 +17,9 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 
 SCOPES = ["https://www.googleapis.com/auth/drive"]
+ACREDITACIONES_DRIVE_NAME = "Acreditaciones"
+ACREDITACIONES_ROOT_FOLDER_NAME = "Acreditaciones"
+NUMERIC_PREFIX_PATTERN = re.compile(r"^\s*\d+\s*[-_.]?\s*")
 
 
 class DriveService:
@@ -25,6 +29,35 @@ class DriveService:
         self.client_secret_file = settings.GOOGLE_CLIENT_SECRET_FILE
         self.token_file = settings.GOOGLE_TOKEN_FILE
         self.service = None
+
+    @staticmethod
+    def _normalize_name(value: str) -> str:
+        """Normaliza texto para comparaciones case-insensitive y sin tildes."""
+        normalized = unicodedata.normalize("NFD", value or "")
+        without_accents = "".join(
+            ch for ch in normalized if unicodedata.category(ch) != "Mn"
+        )
+        collapsed_spaces = " ".join(without_accents.strip().split())
+        return collapsed_spaces.casefold()
+
+    def _normalize_base_folder_label(self, value: str) -> str:
+        """Normaliza etiqueta base ignorando prefijos numericos (01, 02, ...)."""
+        normalized = self._normalize_name(value)
+        return NUMERIC_PREFIX_PATTERN.sub("", normalized)
+
+    def _match_folder_name(
+        self,
+        actual_name: str,
+        expected_name: str,
+        ignore_numeric_prefix: bool = False,
+    ) -> bool:
+        """Compara nombres de carpeta con normalizacion configurable."""
+        if ignore_numeric_prefix:
+            return (
+                self._normalize_base_folder_label(actual_name)
+                == self._normalize_base_folder_label(expected_name)
+            )
+        return self._normalize_name(actual_name) == self._normalize_name(expected_name)
 
     def get_service(self):
         """Obtiene un cliente autenticado de Google Drive API."""
@@ -101,7 +134,7 @@ class DriveService:
                 return None
 
             for drive in results.get("drives", []):
-                if drive.get("name") == drive_name:
+                if self._match_folder_name(drive.get("name", ""), drive_name):
                     return drive.get("id")
 
             page_token = results.get("nextPageToken")
@@ -170,6 +203,7 @@ class DriveService:
         folder_name: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
         """Busca una carpeta por nombre exacto dentro de un directorio."""
         service = self.get_service()
@@ -216,7 +250,11 @@ class DriveService:
                 return None
 
             for item in results.get("files", []):
-                if item.get("name") == folder_name:
+                if self._match_folder_name(
+                    item.get("name", ""),
+                    folder_name,
+                    ignore_numeric_prefix=ignore_numeric_prefix,
+                ):
                     return item.get("id")
 
             page_token = results.get("nextPageToken")
@@ -225,17 +263,43 @@ class DriveService:
 
         return None
 
+    def find_folder_by_normalized_name_in_directory(
+        self,
+        folder_name: str,
+        parent_id: str,
+        drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
+    ) -> Optional[str]:
+        """Busca carpeta por normalizacion (sin tildes, case-insensitive)."""
+        folders = self.list_folders_in_directory(parent_id, drive_id)
+        for name, folder_id in folders:
+            if self._match_folder_name(
+                name,
+                folder_name,
+                ignore_numeric_prefix=ignore_numeric_prefix,
+            ):
+                return folder_id
+        return None
+
     def find_folder_containing_name(
         self,
         folder_name_part: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
-        """Busca una carpeta por coincidencia parcial (case-insensitive)."""
+        """Busca una carpeta por coincidencia parcial normalizada."""
         folders = self.list_folders_in_directory(parent_id, drive_id)
-        search = folder_name_part.strip().lower()
+        if ignore_numeric_prefix:
+            search = self._normalize_base_folder_label(folder_name_part)
+        else:
+            search = self._normalize_name(folder_name_part)
         for name, folder_id in folders:
-            if search in name.lower():
+            if ignore_numeric_prefix:
+                candidate = self._normalize_base_folder_label(name)
+            else:
+                candidate = self._normalize_name(name)
+            if search in candidate:
                 return folder_id
         return None
 
@@ -244,17 +308,37 @@ class DriveService:
         folder_name: str,
         parent_id: str,
         drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
     ) -> Optional[str]:
-        """Busca carpeta: primero exacto, luego contains."""
-        exact_id = self.find_folder_by_name_in_directory(folder_name, parent_id, drive_id)
+        """Busca carpeta: exacto, luego normalizado y finalmente contains."""
+        exact_id = self.find_folder_by_name_in_directory(
+            folder_name,
+            parent_id,
+            drive_id,
+            ignore_numeric_prefix=ignore_numeric_prefix,
+        )
         if exact_id:
             return exact_id
-        return self.find_folder_containing_name(folder_name, parent_id, drive_id)
+
+        normalized_id = self.find_folder_by_normalized_name_in_directory(
+            folder_name,
+            parent_id,
+            drive_id,
+            ignore_numeric_prefix=ignore_numeric_prefix,
+        )
+        if normalized_id:
+            return normalized_id
+
+        return self.find_folder_containing_name(
+            folder_name,
+            parent_id,
+            drive_id,
+            ignore_numeric_prefix=ignore_numeric_prefix,
+        )
 
     def resolve_parent_drive_context(self, codigo_proyecto: str) -> Optional[Dict[str, str]]:
         """
-        Resuelve el Shared Drive anual:
-        codigo_proyecto MY-XXX-YYYY -> Shared Drive Proyectos YYYY
+        Resuelve contexto base desde el Shared Drive central de Acreditaciones.
         """
         match = re.match(r"^MY-\d{3}-(\d{4})$", codigo_proyecto)
         if not match:
@@ -265,7 +349,7 @@ class DriveService:
             return None
 
         year = match.group(1)
-        drive_name = f"Proyectos {year}"
+        drive_name = ACREDITACIONES_DRIVE_NAME
         parent_drive_id = self.find_shared_drive_by_name(drive_name)
         if not parent_drive_id:
             logger.error("No se encontro Shared Drive '%s'", drive_name)
@@ -284,10 +368,10 @@ class DriveService:
     ) -> Optional[Dict[str, str]]:
         """
         Resuelve IDs para:
-        Proyectos YYYY -> MY-XXX-YYYY -> 08 Terrenos -> 03 Acreditacion y Arranque -> 01 Acreditacion
+        Acreditaciones (Shared Drive) -> Acreditaciones -> Proyectos YYYY -> MY-XXX-YYYY
 
         Si se recibe parent_ctx, reutiliza ese contexto anual ya resuelto para evitar
-        consultas duplicadas al resolver el Shared Drive.
+        consultas duplicadas al resolver el Shared Drive de Acreditaciones.
         """
         resolved_parent_ctx = parent_ctx or self.resolve_parent_drive_context(codigo_proyecto)
         if not resolved_parent_ctx:
@@ -298,11 +382,11 @@ class DriveService:
         drive_name = resolved_parent_ctx["drive_name"]
         current_parent = drive_id
         route_candidates = [
+            [ACREDITACIONES_ROOT_FOLDER_NAME],
+            [f"Proyectos {year}"],
             [codigo_proyecto],
-            ["08 Terrenos"],
-            ["03 Acreditación y Arranque", "03 Acreditacion y Arranque"],
-            ["01 Acreditación", "01 Acreditacion"],
         ]
+        resolved_ids: List[str] = []
 
         for level_options in route_candidates:
             folder_id = None
@@ -324,14 +408,21 @@ class DriveService:
                 )
                 return None
             current_parent = folder_id
+            resolved_ids.append(folder_id)
+
+        carpeta_acreditaciones_id, carpeta_proyectos_anio_id, carpeta_proyecto_id = resolved_ids
 
         return {
             "drive_id": drive_id,
-            "id_carpeta_acreditacion": current_parent,
+            "id_carpeta_acreditaciones": carpeta_acreditaciones_id,
+            "id_carpeta_proyectos_anio": carpeta_proyectos_anio_id,
+            "id_carpeta_proyecto": carpeta_proyecto_id,
+            # Se mantiene por compatibilidad: ahora apunta a la carpeta del proyecto.
+            "id_carpeta_acreditacion": carpeta_proyecto_id,
             "codigo_proyecto": codigo_proyecto,
             "year": year,
             "drive_name": drive_name,
         }
 
-
 drive_service = DriveService()
+

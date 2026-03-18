@@ -83,43 +83,38 @@ class SupabaseService:
         Returns:
             drive_folder_id si se encuentra, None si no
         """
-        # Compatibilidad de esquema:
-        # - entornos nuevos: nombre_conductor
-        # - entornos legacy: nombre_trabajador
-        for nombre_columna in ("nombre_conductor", "nombre_trabajador"):
-            try:
-                response = (
-                    self.client.table("fct_acreditacion_solicitud_conductor_manual")
-                    .select("drive_folder_id")
-                    .eq("codigo_proyecto", codigo_proyecto)
-                    .eq(nombre_columna, nombre_trabajador)
-                    .limit(1)
-                    .execute()
-                )
+        try:
+            response = (
+                self.client.table("fct_acreditacion_solicitud_conductor_manual")
+                .select("drive_folder_id")
+                .eq("codigo_proyecto", codigo_proyecto)
+                .eq("nombre_conductor", nombre_trabajador)
+                .limit(1)
+                .execute()
+            )
 
-                if response.data and len(response.data) > 0:
-                    drive_folder_id = response.data[0].get("drive_folder_id")
-                    logger.info(
-                        "Encontrado drive_folder_id en conductor (%s): %s -> %s",
-                        nombre_columna,
-                        nombre_trabajador,
-                        drive_folder_id,
-                    )
-                    return drive_folder_id
-            except Exception as e:
-                # Si la columna no existe en este entorno, probamos la siguiente.
-                logger.debug(
-                    "No se pudo consultar conductor por columna %s: %s",
-                    nombre_columna,
-                    e,
+            if response.data and len(response.data) > 0:
+                drive_folder_id = response.data[0].get("drive_folder_id")
+                logger.info(
+                    "Encontrado drive_folder_id en conductor: %s -> %s",
+                    nombre_trabajador,
+                    drive_folder_id,
                 )
+                return drive_folder_id
 
-        logger.debug(
-            "No se encontro drive_folder_id en conductor para: %s, %s",
-            codigo_proyecto,
-            nombre_trabajador,
-        )
-        return None
+            logger.debug(
+                "No se encontro drive_folder_id en conductor para: %s, %s",
+                codigo_proyecto,
+                nombre_trabajador,
+            )
+            return None
+        except Exception as e:
+            logger.error(
+                "Error buscando drive_folder_id en conductor para %s: %s",
+                nombre_trabajador,
+                e,
+            )
+            return None
 
     def buscar_drive_folder_id_vehiculo(
         self,

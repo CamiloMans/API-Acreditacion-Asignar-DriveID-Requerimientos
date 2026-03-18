@@ -8,10 +8,10 @@ API FastAPI para asignar `drive_folder_id` y `parent_drive_id` en
 La API procesa registros por `codigo_proyecto` y aplica estas reglas:
 
 1. Si `categoria_requerimiento == "Empresa"`:
-   - Si `empresa_acreditacion == "Myma"`: usa la carpeta `02 MYMA`.
-   - Si es otra empresa: busca `01 Externos` y luego la carpeta con el nombre de la empresa.
+   - Si `empresa_acreditacion == "Myma"`: busca `MYMA/01 Empresa`.
+   - Si es otra empresa: busca `Externos/<empresa>/01 Empresa`.
    - Base de ruta:
-     `Proyectos YYYY -> MY-XXX-YYYY -> 08 Terrenos -> 03 Acreditación y Arranque -> 01 Acreditación`.
+     `Acreditaciones (Shared Drive) -> Acreditaciones -> Proyectos YYYY -> MY-XXX-YYYY`.
 2. Si `categoria_requerimiento != "Empresa"`:
    - Si es categoria de vehiculo (`vehiculo`, `vehiculos`, `vehículo`, `vehículos`):
      - no exige `nombre_trabajador`
@@ -21,8 +21,7 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
      - busca `drive_folder_id` en `fct_acreditacion_solicitud_trabajador_manual`
      - luego en `fct_acreditacion_solicitud_conductor_manual`
      - luego en `fct_acreditacion_solicitud_vehiculos` si el registro incluye `patente_vehiculo`
-3. Resuelve `parent_drive_id` una sola vez por request desde el Shared Drive anual
-   `Proyectos YYYY` segun el `codigo_proyecto` (`MY-XXX-YYYY`) y lo reutiliza para
+3. Resuelve `parent_drive_id` una sola vez por request desde el Shared Drive `Acreditaciones` y lo reutiliza para
    todos los registros del payload.
 4. Si encuentra `drive_folder_id`, actualiza `drive_folder_id` y `parent_drive_id`.
 5. Si no encuentra `drive_folder_id`, continua con el siguiente registro y, cuando
@@ -31,7 +30,8 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
 Notas de matching:
 - Comparaciones de categoria y empresa: `trim + case-insensitive`.
 - Patente de vehiculo: `trim` + match exacto en Supabase (sin normalizar formato).
-- Busqueda de carpetas en Drive: primero exacta, luego por `contains`.
+- Busqueda de carpetas en Drive: exacta, normalizada (case + tildes) y luego `contains`.
+- Para labels base como `01 Empresa`, el matching ignora prefijo numerico (`01`, `02`, ...).
 - Este flujo no crea carpetas nuevas en Drive.
 
 ## Requisitos
