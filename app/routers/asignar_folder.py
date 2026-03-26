@@ -1,5 +1,7 @@
 """Router para asignar folder ID a requerimiento."""
 import logging
+import time
+from typing import Dict, Optional, Tuple
 
 from fastapi import APIRouter
 
@@ -29,7 +31,7 @@ def _es_categoria_vehiculo(value: str) -> bool:
 
 
 @router.post("", response_model=AsignarFolderResponse)
-async def asignar_folder(request: AsignarFolderRequest):
+def asignar_folder(request: AsignarFolderRequest):
     """
     Asigna drive_folder_id a registros en brg_acreditacion_solicitud_requerimiento.
 
@@ -50,6 +52,7 @@ async def asignar_folder(request: AsignarFolderRequest):
     actualizados_exitosos = 0
     actualizados_fallidos = 0
     sin_drive_folder_id = 0
+    started_at = time.perf_counter()
 
     parent_ctx = drive_service.resolve_parent_drive_context(request.codigo_proyecto)
     parent_drive_id = parent_ctx["parent_drive_id"] if parent_ctx else None
@@ -68,6 +71,10 @@ async def asignar_folder(request: AsignarFolderRequest):
     # Cache por request para evitar recalcular ruta del proyecto en cada registro Empresa.
     proyecto_drive_ctx = None
     proyecto_drive_resuelto = False
+    empresa_folder_cache: Dict[str, Optional[str]] = {}
+    trabajador_folder_cache: Dict[str, Optional[str]] = {}
+    conductor_folder_cache: Dict[str, Optional[str]] = {}
+    vehiculo_folder_cache: Dict[Tuple[int, str], Optional[str]] = {}
 
     for registro in request.registros:
         categoria = _normalize(registro.categoria_requerimiento)
@@ -114,60 +121,67 @@ async def asignar_folder(request: AsignarFolderRequest):
                     request.codigo_proyecto,
                 )
             else:
-                drive_id = proyecto_drive_ctx["drive_id"]
-                id_carpeta_proyecto = proyecto_drive_ctx["id_carpeta_acreditacion"]
-
-                if empresa_normalizada == "myma":
-                    carpeta_myma_id = drive_service.find_folder_exact_or_contains(
-                        "MYMA",
-                        id_carpeta_proyecto,
-                        drive_id,
-                    )
-                    if not carpeta_myma_id:
-                        logger.warning(
-                            "No se encontro carpeta 'MYMA' para codigo_proyecto=%s",
-                            request.codigo_proyecto,
-                        )
-                    else:
-                        drive_folder_id_final = drive_service.find_folder_exact_or_contains(
-                            "01 Empresa",
-                            carpeta_myma_id,
-                            drive_id,
-                            ignore_numeric_prefix=True,
-                        )
-                        id_source = "drive_empresa"
+                if empresa_normalizada in empresa_folder_cache:
+                    drive_folder_id_final = empresa_folder_cache[empresa_normalizada]
+                    if drive_folder_id_final:
+                        id_source = "drive_empresa_cache"
                 else:
-                    carpeta_externos_id = drive_service.find_folder_exact_or_contains(
-                        "Externos",
-                        id_carpeta_proyecto,
-                        drive_id,
-                    )
+                    drive_id = proyecto_drive_ctx["drive_id"]
+                    id_carpeta_proyecto = proyecto_drive_ctx["id_carpeta_acreditacion"]
 
-                    if not carpeta_externos_id:
-                        logger.warning(
-                            "No se encontro carpeta 'Externos' para codigo_proyecto=%s",
-                            request.codigo_proyecto,
-                        )
-                    else:
-                        carpeta_empresa_id = drive_service.find_folder_exact_or_contains(
-                            empresa,
-                            carpeta_externos_id,
+                    if empresa_normalizada == "myma":
+                        carpeta_myma_id = drive_service.find_folder_exact_or_contains(
+                            "MYMA",
+                            id_carpeta_proyecto,
                             drive_id,
                         )
-                        if not carpeta_empresa_id:
+                        if not carpeta_myma_id:
                             logger.warning(
-                                "No se encontro carpeta de contratista '%s' en Externos para codigo_proyecto=%s",
-                                empresa,
+                                "No se encontro carpeta 'MYMA' para codigo_proyecto=%s",
                                 request.codigo_proyecto,
                             )
                         else:
                             drive_folder_id_final = drive_service.find_folder_exact_or_contains(
                                 "01 Empresa",
-                                carpeta_empresa_id,
+                                carpeta_myma_id,
                                 drive_id,
                                 ignore_numeric_prefix=True,
                             )
                             id_source = "drive_empresa"
+                    else:
+                        carpeta_externos_id = drive_service.find_folder_exact_or_contains(
+                            "Externos",
+                            id_carpeta_proyecto,
+                            drive_id,
+                        )
+
+                        if not carpeta_externos_id:
+                            logger.warning(
+                                "No se encontro carpeta 'Externos' para codigo_proyecto=%s",
+                                request.codigo_proyecto,
+                            )
+                        else:
+                            carpeta_empresa_id = drive_service.find_folder_exact_or_contains(
+                                empresa,
+                                carpeta_externos_id,
+                                drive_id,
+                            )
+                            if not carpeta_empresa_id:
+                                logger.warning(
+                                    "No se encontro carpeta de contratista '%s' en Externos para codigo_proyecto=%s",
+                                    empresa,
+                                    request.codigo_proyecto,
+                                )
+                            else:
+                                drive_folder_id_final = drive_service.find_folder_exact_or_contains(
+                                    "01 Empresa",
+                                    carpeta_empresa_id,
+                                    drive_id,
+                                    ignore_numeric_prefix=True,
+                                )
+                                id_source = "drive_empresa"
+
+                    empresa_folder_cache[empresa_normalizada] = drive_folder_id_final
 
                 if not drive_folder_id_final:
                     logger.warning(
@@ -177,24 +191,47 @@ async def asignar_folder(request: AsignarFolderRequest):
                     )
         else:
             if es_categoria_vehiculo:
-                drive_folder_id_vehiculo = supabase_service.buscar_drive_folder_id_vehiculo(
-                    request.id_proyecto,
-                    registro.patente_vehiculo,
-                )
+                patente_normalizada = (registro.patente_vehiculo or "").strip()
+                vehiculo_cache_key = (request.id_proyecto, patente_normalizada)
+                if vehiculo_cache_key in vehiculo_folder_cache:
+                    drive_folder_id_vehiculo = vehiculo_folder_cache[vehiculo_cache_key]
+                else:
+                    drive_folder_id_vehiculo = (
+                        supabase_service.buscar_drive_folder_id_vehiculo(
+                            request.id_proyecto,
+                            patente_normalizada,
+                        )
+                    )
+                    vehiculo_folder_cache[vehiculo_cache_key] = drive_folder_id_vehiculo
                 drive_folder_id_final = drive_folder_id_vehiculo
                 if drive_folder_id_vehiculo:
                     id_source = "supabase_vehiculo"
             else:
-                drive_folder_id_trabajador = (
-                    supabase_service.buscar_drive_folder_id_trabajador(
-                        request.codigo_proyecto,
-                        registro.nombre_trabajador,
+                nombre_trabajador = registro.nombre_trabajador or ""
+                nombre_cache_key = _normalize(nombre_trabajador)
+
+                if nombre_cache_key in trabajador_folder_cache:
+                    drive_folder_id_trabajador = trabajador_folder_cache[nombre_cache_key]
+                else:
+                    drive_folder_id_trabajador = (
+                        supabase_service.buscar_drive_folder_id_trabajador(
+                            request.codigo_proyecto,
+                            nombre_trabajador,
+                        )
                     )
-                )
-                drive_folder_id_conductor = supabase_service.buscar_drive_folder_id_conductor(
-                    request.codigo_proyecto,
-                    registro.nombre_trabajador,
-                )
+                    trabajador_folder_cache[nombre_cache_key] = drive_folder_id_trabajador
+
+                if nombre_cache_key in conductor_folder_cache:
+                    drive_folder_id_conductor = conductor_folder_cache[nombre_cache_key]
+                else:
+                    drive_folder_id_conductor = (
+                        supabase_service.buscar_drive_folder_id_conductor(
+                            request.codigo_proyecto,
+                            nombre_trabajador,
+                        )
+                    )
+                    conductor_folder_cache[nombre_cache_key] = drive_folder_id_conductor
+
                 drive_folder_id_final = (
                     drive_folder_id_trabajador or drive_folder_id_conductor
                 )
@@ -209,12 +246,18 @@ async def asignar_folder(request: AsignarFolderRequest):
                     and registro.patente_vehiculo
                     and request.id_proyecto is not None
                 ):
-                    drive_folder_id_vehiculo = (
-                        supabase_service.buscar_drive_folder_id_vehiculo(
-                            request.id_proyecto,
-                            registro.patente_vehiculo,
+                    patente_normalizada = registro.patente_vehiculo.strip()
+                    vehiculo_cache_key = (request.id_proyecto, patente_normalizada)
+                    if vehiculo_cache_key in vehiculo_folder_cache:
+                        drive_folder_id_vehiculo = vehiculo_folder_cache[vehiculo_cache_key]
+                    else:
+                        drive_folder_id_vehiculo = (
+                            supabase_service.buscar_drive_folder_id_vehiculo(
+                                request.id_proyecto,
+                                patente_normalizada,
+                            )
                         )
-                    )
+                        vehiculo_folder_cache[vehiculo_cache_key] = drive_folder_id_vehiculo
                     if drive_folder_id_vehiculo:
                         drive_folder_id_final = drive_folder_id_vehiculo
                         id_source = "supabase_vehiculo"
@@ -291,11 +334,21 @@ async def asignar_folder(request: AsignarFolderRequest):
     else:
         mensaje = "No se pudo actualizar ningun registro"
 
+    elapsed = time.perf_counter() - started_at
     logger.info(
-        "Proceso completado actualizados=%s fallidos=%s sin_drive_folder_id=%s",
+        (
+            "Proceso completado actualizados=%s fallidos=%s sin_drive_folder_id=%s "
+            "duracion=%.2fs cache_empresas=%s cache_trabajadores=%s "
+            "cache_conductores=%s cache_vehiculos=%s"
+        ),
         actualizados_exitosos,
         actualizados_fallidos,
         sin_drive_folder_id,
+        elapsed,
+        len(empresa_folder_cache),
+        len(trabajador_folder_cache),
+        len(conductor_folder_cache),
+        len(vehiculo_folder_cache),
     )
 
     return AsignarFolderResponse(

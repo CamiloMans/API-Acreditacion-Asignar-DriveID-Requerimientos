@@ -664,6 +664,171 @@ def test_asignar_folder_request_mixto_comparte_parent(monkeypatch) -> None:
     assert parent_calls["count"] == 1
 
 
+def test_asignar_folder_cachea_lookups_repetidos(monkeypatch) -> None:
+    parent_calls = {"count": 0}
+    acreditacion_calls = {"count": 0}
+    find_folder_calls: List[Dict[str, Any]] = []
+    trabajador_calls: List[str] = []
+    conductor_calls: List[str] = []
+
+    def mock_resolve_parent(codigo_proyecto: str) -> Dict[str, str]:
+        parent_calls["count"] += 1
+        assert codigo_proyecto == "MY-000-2026"
+        return DEFAULT_PARENT_CTX
+
+    def mock_resolve_acreditacion_root(
+        codigo_proyecto: str,
+        parent_ctx: Optional[Dict[str, str]] = None,
+    ):
+        acreditacion_calls["count"] += 1
+        assert codigo_proyecto == "MY-000-2026"
+        assert parent_ctx == DEFAULT_PARENT_CTX
+        return {
+            "drive_id": "drive-123",
+            "id_carpeta_acreditacion": "proyecto-456",
+            "codigo_proyecto": codigo_proyecto,
+            "year": "2026",
+            "drive_name": "Acreditaciones",
+        }
+
+    def mock_find_folder_exact_or_contains(
+        folder_name: str,
+        parent_id: str,
+        drive_id: Optional[str] = None,
+        ignore_numeric_prefix: bool = False,
+    ) -> Optional[str]:
+        find_folder_calls.append(
+            {
+                "folder_name": folder_name,
+                "parent_id": parent_id,
+                "drive_id": drive_id,
+                "ignore_numeric_prefix": ignore_numeric_prefix,
+            }
+        )
+        if folder_name == "MYMA":
+            return "myma-789"
+        if folder_name == "Externos":
+            return "externos-111"
+        if folder_name == "Econsult Ambiental":
+            return "econsult-222"
+        if folder_name == "01 Empresa" and parent_id == "myma-789":
+            return "folder-myma-001"
+        if folder_name == "01 Empresa" and parent_id == "econsult-222":
+            return "folder-econsult-001"
+        return None
+
+    def mock_buscar_trabajador(_codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
+        trabajador_calls.append(nombre_trabajador)
+        if nombre_trabajador == "Ailan Villalon Cueto":
+            return "folder-trab-ailan"
+        if nombre_trabajador == "Alan Flores":
+            return "folder-trab-alan"
+        return None
+
+    def mock_buscar_conductor(_codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
+        conductor_calls.append(nombre_trabajador)
+        return None
+
+    def mock_actualizar(
+        _registro_id: int,
+        drive_folder_id: Optional[str] = None,
+        parent_drive_id: Optional[str] = None,
+    ) -> bool:
+        assert drive_folder_id is not None
+        assert parent_drive_id == "drive-123"
+        return True
+
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_parent_drive_context",
+        mock_resolve_parent,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "resolve_acreditacion_root",
+        mock_resolve_acreditacion_root,
+    )
+    monkeypatch.setattr(
+        drive_service,
+        "find_folder_exact_or_contains",
+        mock_find_folder_exact_or_contains,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_trabajador",
+        mock_buscar_trabajador,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "buscar_drive_folder_id_conductor",
+        mock_buscar_conductor,
+    )
+    monkeypatch.setattr(
+        supabase_service,
+        "actualizar_brg_acreditacion_solicitud_requerimiento",
+        mock_actualizar,
+    )
+
+    payload = {
+        "codigo_proyecto": "MY-000-2026",
+        "registros": [
+            {
+                "id": 1,
+                "categoria_requerimiento": "Empresa",
+                "empresa_acreditacion": "Myma",
+                "nombre_trabajador": None,
+            },
+            {
+                "id": 2,
+                "categoria_requerimiento": "Empresa",
+                "empresa_acreditacion": "MyMA",
+                "nombre_trabajador": None,
+            },
+            {
+                "id": 3,
+                "categoria_requerimiento": "Empresa",
+                "empresa_acreditacion": "Econsult Ambiental",
+                "nombre_trabajador": None,
+            },
+            {
+                "id": 4,
+                "categoria_requerimiento": "Empresa",
+                "empresa_acreditacion": "Econsult Ambiental",
+                "nombre_trabajador": None,
+            },
+            {
+                "id": 5,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "Myma",
+                "nombre_trabajador": "Ailan Villalon Cueto",
+            },
+            {
+                "id": 6,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "Myma",
+                "nombre_trabajador": "Alan Flores",
+            },
+            {
+                "id": 7,
+                "categoria_requerimiento": "Persona",
+                "empresa_acreditacion": "Myma",
+                "nombre_trabajador": "Ailan Villalon Cueto",
+            },
+        ],
+    }
+
+    response = client.post("/asignar-folder", json=payload)
+    assert response.status_code == 200
+    body = response.json()
+
+    assert body["resumen"]["actualizados_exitosos"] == 7
+    assert parent_calls["count"] == 1
+    assert acreditacion_calls["count"] == 1
+    assert len(find_folder_calls) == 5
+    assert sorted(trabajador_calls) == ["Ailan Villalon Cueto", "Alan Flores"]
+    assert sorted(conductor_calls) == ["Ailan Villalon Cueto", "Alan Flores"]
+
+
 def test_asignar_folder_recupera_parent_desde_acreditacion(monkeypatch) -> None:
     parent_calls = {"count": 0}
     update_calls: List[Dict[str, Any]] = []
