@@ -215,7 +215,7 @@ def asignar_folder(request: AsignarFolderRequest):
                 else:
                     drive_folder_id_trabajador = (
                         supabase_service.buscar_drive_folder_id_trabajador(
-                            request.codigo_proyecto,
+                            request.id_proyecto,
                             nombre_trabajador,
                         )
                     )
@@ -226,7 +226,7 @@ def asignar_folder(request: AsignarFolderRequest):
                 else:
                     drive_folder_id_conductor = (
                         supabase_service.buscar_drive_folder_id_conductor(
-                            request.codigo_proyecto,
+                            request.id_proyecto,
                             nombre_trabajador,
                         )
                     )

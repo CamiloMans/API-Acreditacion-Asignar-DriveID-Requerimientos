@@ -338,13 +338,13 @@ def test_drive_service_find_folder_normaliza_y_ignora_prefijo_numerico(monkeypat
 
 
 def test_asignar_folder_no_empresa_prioriza_trabajador(monkeypatch) -> None:
-    def mock_buscar_trabajador(codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
-        assert codigo_proyecto == "MY-000-2026"
+    def mock_buscar_trabajador(id_proyecto: int, nombre_trabajador: str) -> Optional[str]:
+        assert id_proyecto == 123
         assert nombre_trabajador == "Diego Soto"
         return "folder-trab-123"
 
-    def mock_buscar_conductor(codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
-        assert codigo_proyecto == "MY-000-2026"
+    def mock_buscar_conductor(id_proyecto: int, nombre_trabajador: str) -> Optional[str]:
+        assert id_proyecto == 123
         assert nombre_trabajador == "Diego Soto"
         return "folder-cond-999"
 
@@ -381,6 +381,7 @@ def test_asignar_folder_no_empresa_prioriza_trabajador(monkeypatch) -> None:
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -450,6 +451,7 @@ def test_asignar_folder_sin_drive_folder_id_actualiza_solo_parent(monkeypatch) -
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -477,8 +479,8 @@ def test_asignar_folder_parent_no_resoluble_continua(monkeypatch) -> None:
     def mock_parent_no_resoluble(_codigo_proyecto: str) -> None:
         return None
 
-    def mock_buscar_trabajador(codigo_proyecto: str, nombre_trabajador: str) -> Optional[str]:
-        assert codigo_proyecto == "MY-000-2026"
+    def mock_buscar_trabajador(id_proyecto: int, nombre_trabajador: str) -> Optional[str]:
+        assert id_proyecto == 123
         assert nombre_trabajador == "Diego Soto"
         return "folder-trab-123"
 
@@ -517,6 +519,7 @@ def test_asignar_folder_parent_no_resoluble_continua(monkeypatch) -> None:
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -630,6 +633,7 @@ def test_asignar_folder_request_mixto_comparte_parent(monkeypatch) -> None:
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -770,6 +774,7 @@ def test_asignar_folder_cachea_lookups_repetidos(monkeypatch) -> None:
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -924,6 +929,7 @@ def test_asignar_folder_recupera_parent_desde_acreditacion(monkeypatch) -> None:
     )
 
     payload = {
+        "id_proyecto": 123,
         "codigo_proyecto": "MY-000-2026",
         "registros": [
             {
@@ -1324,10 +1330,12 @@ def test_buscar_drive_folder_id_trabajador_filtra_drive_folder_id_nulo() -> None
         [{"drive_folder_id": "folder-trabajador"}]
     )
 
-    result = service.buscar_drive_folder_id_trabajador("MY-032-2026", "Persona Uno")
+    result = service.buscar_drive_folder_id_trabajador(314, "Persona Uno")
 
     assert result == "folder-trabajador"
     assert fake_client.tables == ["fct_acreditacion_solicitud_trabajador_manual"]
+    assert ("eq", "id_proyecto", 314) in fake_client.query.calls
+    assert ("eq", "codigo_proyecto", "MY-032-2026") not in fake_client.query.calls
     assert ("not_is", "drive_folder_id", "null") in fake_client.query.calls
 
 
@@ -1336,10 +1344,12 @@ def test_buscar_drive_folder_id_conductor_filtra_drive_folder_id_nulo() -> None:
         [{"drive_folder_id": "folder-conductor"}]
     )
 
-    result = service.buscar_drive_folder_id_conductor("MY-032-2026", "Persona Dos")
+    result = service.buscar_drive_folder_id_conductor(314, "Persona Dos")
 
     assert result == "folder-conductor"
     assert fake_client.tables == ["fct_acreditacion_solicitud_conductor_manual"]
+    assert ("eq", "id_proyecto", 314) in fake_client.query.calls
+    assert ("eq", "codigo_proyecto", "MY-032-2026") not in fake_client.query.calls
     assert ("not_is", "drive_folder_id", "null") in fake_client.query.calls
 
 

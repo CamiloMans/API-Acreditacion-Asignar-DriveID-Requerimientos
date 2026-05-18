@@ -22,14 +22,14 @@ class SupabaseService:
 
     def buscar_drive_folder_id_trabajador(
         self,
-        codigo_proyecto: str,
+        id_proyecto: int,
         nombre_trabajador: str,
     ) -> Optional[str]:
         """
         Busca el drive_folder_id en fct_acreditacion_solicitud_trabajador_manual.
 
         Args:
-            codigo_proyecto: Codigo del proyecto
+            id_proyecto: ID del proyecto
             nombre_trabajador: Nombre del trabajador
 
         Returns:
@@ -39,7 +39,7 @@ class SupabaseService:
             response = (
                 self.client.table("fct_acreditacion_solicitud_trabajador_manual")
                 .select("drive_folder_id")
-                .eq("codigo_proyecto", codigo_proyecto)
+                .eq("id_proyecto", id_proyecto)
                 .eq("nombre_trabajador", nombre_trabajador)
                 .not_.is_("drive_folder_id", "null")
                 .limit(1)
@@ -56,8 +56,8 @@ class SupabaseService:
                 return drive_folder_id
 
             logger.debug(
-                "No se encontro drive_folder_id en trabajador para: %s, %s",
-                codigo_proyecto,
+                "No se encontro drive_folder_id en trabajador para: proyecto=%s, trabajador=%s",
+                id_proyecto,
                 nombre_trabajador,
             )
             return None
@@ -71,14 +71,14 @@ class SupabaseService:
 
     def buscar_drive_folder_id_conductor(
         self,
-        codigo_proyecto: str,
+        id_proyecto: int,
         nombre_trabajador: str,
     ) -> Optional[str]:
         """
         Busca el drive_folder_id en fct_acreditacion_solicitud_conductor_manual.
 
         Args:
-            codigo_proyecto: Codigo del proyecto
+            id_proyecto: ID del proyecto
             nombre_trabajador: Nombre del trabajador
 
         Returns:
@@ -88,7 +88,7 @@ class SupabaseService:
             response = (
                 self.client.table("fct_acreditacion_solicitud_conductor_manual")
                 .select("drive_folder_id")
-                .eq("codigo_proyecto", codigo_proyecto)
+                .eq("id_proyecto", id_proyecto)
                 .eq("nombre_conductor", nombre_trabajador)
                 .not_.is_("drive_folder_id", "null")
                 .limit(1)
@@ -105,8 +105,8 @@ class SupabaseService:
                 return drive_folder_id
 
             logger.debug(
-                "No se encontro drive_folder_id en conductor para: %s, %s",
-                codigo_proyecto,
+                "No se encontro drive_folder_id en conductor para: proyecto=%s, conductor=%s",
+                id_proyecto,
                 nombre_trabajador,
             )
             return None

@@ -75,7 +75,7 @@ class AsignarFolderRequest(BaseModel):
         None,
         gt=0,
         description=(
-            "ID del proyecto. Requerido si hay registros de vehiculo o patente_vehiculo"
+            "ID del proyecto. Requerido si hay registros distintos de Empresa"
         ),
     )
     codigo_proyecto: str = Field(..., description="Codigo del proyecto")
@@ -83,15 +83,16 @@ class AsignarFolderRequest(BaseModel):
 
     @model_validator(mode="after")
     def validar_id_proyecto_para_busqueda_vehiculo(self):
-        """Exige id_proyecto cuando el payload requiere lookup de vehiculos."""
+        """Exige id_proyecto cuando el payload requiere lookups en Supabase."""
         requiere_id_proyecto = any(
-            _is_categoria_vehiculo(registro.categoria_requerimiento)
+            _normalize_categoria(registro.categoria_requerimiento) != "empresa"
+            or _is_categoria_vehiculo(registro.categoria_requerimiento)
             or bool(registro.patente_vehiculo)
             for registro in self.registros
         )
         if requiere_id_proyecto and self.id_proyecto is None:
             raise ValueError(
-                "id_proyecto es obligatorio cuando existe categoria de vehiculo o patente_vehiculo en registros"
+                "id_proyecto es obligatorio cuando existen registros distintos de 'Empresa'"
             )
         return self
 

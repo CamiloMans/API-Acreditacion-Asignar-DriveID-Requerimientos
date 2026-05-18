@@ -18,8 +18,8 @@ La API procesa registros por `codigo_proyecto` y aplica estas reglas:
      - exige `patente_vehiculo`
      - busca `drive_folder_id` en `fct_acreditacion_solicitud_vehiculos` por `id_proyecto + patente`
    - Para otras categorias no Empresa:
-     - busca `drive_folder_id` en `fct_acreditacion_solicitud_trabajador_manual`
-     - luego en `fct_acreditacion_solicitud_conductor_manual`
+     - busca `drive_folder_id` en `fct_acreditacion_solicitud_trabajador_manual` por `id_proyecto + nombre_trabajador`
+     - luego en `fct_acreditacion_solicitud_conductor_manual` por `id_proyecto + nombre_conductor`
      - luego en `fct_acreditacion_solicitud_vehiculos` si el registro incluye `patente_vehiculo`
 3. Resuelve `parent_drive_id` una sola vez por request desde el Shared Drive `Acreditaciones` y lo reutiliza para
    todos los registros del payload.
@@ -105,7 +105,7 @@ python -m uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
 Notas del request:
-- `id_proyecto` es obligatorio si existe al menos un registro de vehiculo o si algun registro incluye `patente_vehiculo`.
+- `id_proyecto` es obligatorio si existe al menos un registro distinto de `Empresa`.
 - `nombre_trabajador` es obligatorio para categorias distintas de `Empresa` y vehiculo.
 - `patente_vehiculo` es obligatoria para categorias de vehiculo.
 
