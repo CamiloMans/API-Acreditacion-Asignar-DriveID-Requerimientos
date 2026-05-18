@@ -18,7 +18,7 @@ os.environ.setdefault(
 
 from app.main import app  # noqa: E402
 from app.services.drive_service import drive_service  # noqa: E402
-from app.services.supabase_service import supabase_service  # noqa: E402
+from app.services.supabase_service import SupabaseService, supabase_service  # noqa: E402
 
 client = TestClient(app)
 
@@ -1261,3 +1261,95 @@ def test_asignar_folder_vehiculo_sin_match_actualiza_solo_parent(monkeypatch) ->
     assert body["registros"][0]["drive_folder_id_final"] is None
     assert body["registros"][0]["actualizado"] is False
     assert len(update_calls) == 1
+
+
+class FakeSupabaseResponse:
+    def __init__(self, data: List[Dict[str, Any]]):
+        self.data = data
+
+
+class FakeNotFilter:
+    def __init__(self, query: "FakeSupabaseQuery"):
+        self.query = query
+
+    def is_(self, column: str, value: str) -> "FakeSupabaseQuery":
+        self.query.calls.append(("not_is", column, value))
+        return self.query
+
+
+class FakeSupabaseQuery:
+    def __init__(self, data: List[Dict[str, Any]]):
+        self.data = data
+        self.calls: List[tuple] = []
+        self.not_ = FakeNotFilter(self)
+
+    def select(self, columns: str) -> "FakeSupabaseQuery":
+        self.calls.append(("select", columns))
+        return self
+
+    def eq(self, column: str, value: Any) -> "FakeSupabaseQuery":
+        self.calls.append(("eq", column, value))
+        return self
+
+    def limit(self, value: int) -> "FakeSupabaseQuery":
+        self.calls.append(("limit", value))
+        return self
+
+    def execute(self) -> FakeSupabaseResponse:
+        self.calls.append(("execute",))
+        return FakeSupabaseResponse(self.data)
+
+
+class FakeSupabaseClient:
+    def __init__(self, data: List[Dict[str, Any]]):
+        self.query = FakeSupabaseQuery(data)
+        self.tables: List[str] = []
+
+    def table(self, name: str) -> FakeSupabaseQuery:
+        self.tables.append(name)
+        return self.query
+
+
+def make_supabase_service_with_fake_client(
+    data: List[Dict[str, Any]],
+) -> tuple[SupabaseService, FakeSupabaseClient]:
+    service = SupabaseService.__new__(SupabaseService)
+    fake_client = FakeSupabaseClient(data)
+    service.client = fake_client
+    return service, fake_client
+
+
+def test_buscar_drive_folder_id_trabajador_filtra_drive_folder_id_nulo() -> None:
+    service, fake_client = make_supabase_service_with_fake_client(
+        [{"drive_folder_id": "folder-trabajador"}]
+    )
+
+    result = service.buscar_drive_folder_id_trabajador("MY-032-2026", "Persona Uno")
+
+    assert result == "folder-trabajador"
+    assert fake_client.tables == ["fct_acreditacion_solicitud_trabajador_manual"]
+    assert ("not_is", "drive_folder_id", "null") in fake_client.query.calls
+
+
+def test_buscar_drive_folder_id_conductor_filtra_drive_folder_id_nulo() -> None:
+    service, fake_client = make_supabase_service_with_fake_client(
+        [{"drive_folder_id": "folder-conductor"}]
+    )
+
+    result = service.buscar_drive_folder_id_conductor("MY-032-2026", "Persona Dos")
+
+    assert result == "folder-conductor"
+    assert fake_client.tables == ["fct_acreditacion_solicitud_conductor_manual"]
+    assert ("not_is", "drive_folder_id", "null") in fake_client.query.calls
+
+
+def test_buscar_drive_folder_id_vehiculo_filtra_drive_folder_id_nulo() -> None:
+    service, fake_client = make_supabase_service_with_fake_client(
+        [{"drive_folder_id": "folder-vehiculo"}]
+    )
+
+    result = service.buscar_drive_folder_id_vehiculo(123, "ABCD12")
+
+    assert result == "folder-vehiculo"
+    assert fake_client.tables == ["fct_acreditacion_solicitud_vehiculos"]
+    assert ("not_is", "drive_folder_id", "null") in fake_client.query.calls
