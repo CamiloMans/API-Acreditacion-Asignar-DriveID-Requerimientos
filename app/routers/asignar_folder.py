@@ -3,8 +3,9 @@ import logging
 import time
 from typing import Dict, Optional, Tuple
 
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
 
+from app.dependencies import require_api_token
 from app.models import (
     AsignarFolderRequest,
     AsignarFolderResponse,
@@ -31,7 +32,10 @@ def _es_categoria_vehiculo(value: str) -> bool:
 
 
 @router.post("", response_model=AsignarFolderResponse)
-def asignar_folder(request: AsignarFolderRequest):
+def asignar_folder(
+    request: AsignarFolderRequest,
+    _: None = Depends(require_api_token),
+):
     """
     Asigna drive_folder_id a registros en brg_acreditacion_solicitud_requerimiento.
 

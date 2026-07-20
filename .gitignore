@@ -40,6 +40,8 @@ env/
 # Credentials
 client_secret.json
 token.json
+runtime-secrets/
+.env.production
 *.json
 !package.json
 !package-lock.json

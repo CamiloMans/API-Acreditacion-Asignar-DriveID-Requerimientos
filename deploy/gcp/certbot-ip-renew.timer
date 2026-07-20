@@ -1,0 +1,11 @@
+[Unit]
+Description=Renew short-lived Let's Encrypt IP certificates twice daily
+
+[Timer]
+OnCalendar=*-*-* 00,12:15:00
+RandomizedDelaySec=45m
+Persistent=true
+Unit=certbot-ip-renew.service
+
+[Install]
+WantedBy=timers.target

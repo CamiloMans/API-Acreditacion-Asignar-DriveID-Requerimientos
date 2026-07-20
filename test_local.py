@@ -2,6 +2,7 @@
 import os
 from typing import Any, Dict, List, Optional
 
+import pytest
 from fastapi.testclient import TestClient
 
 # Variables requeridas por app.config al importar la aplicacion.
@@ -15,12 +16,18 @@ os.environ.setdefault(
         "ZHVtbXktc2lnbmF0dXJl"
     ),
 )
+os.environ.setdefault("ASIGNAR_FOLDER_API_TOKEN", "test-api-token")
 
+from app.config import Settings  # noqa: E402
 from app.main import app  # noqa: E402
 from app.services.drive_service import drive_service  # noqa: E402
 from app.services.supabase_service import SupabaseService, supabase_service  # noqa: E402
 
-client = TestClient(app)
+client = TestClient(
+    app,
+    headers={"Authorization": "Bearer test-api-token"},
+)
+unauthenticated_client = TestClient(app)
 
 
 DEFAULT_PARENT_CTX = {
@@ -49,6 +56,55 @@ def test_root_endpoint() -> None:
     body = response.json()
     assert body["nombre"] == "API Asignar Folder ID a Requerimiento"
     assert body["endpoints"]["asignar_folder"] == "/asignar-folder"
+
+
+def test_asignar_folder_rechaza_token_ausente() -> None:
+    response = unauthenticated_client.post("/asignar-folder", json={})
+    assert response.status_code == 401
+    assert response.headers["www-authenticate"] == "Bearer"
+
+
+def test_asignar_folder_rechaza_token_invalido() -> None:
+    response = unauthenticated_client.post(
+        "/asignar-folder",
+        json={},
+        headers={"Authorization": "Bearer token-invalido"},
+    )
+    assert response.status_code == 401
+
+
+def test_settings_carga_secretos_desde_archivos(tmp_path) -> None:
+    supabase_key_file = tmp_path / "supabase-key"
+    api_token_file = tmp_path / "api-token"
+    supabase_key_file.write_text("supabase-test-key\n", encoding="utf-8")
+    api_token_file.write_text("internal-test-token\n", encoding="utf-8")
+
+    file_settings = Settings(
+        _env_file=None,
+        SUPABASE_PROJECT_ID="local-test",
+        SUPABASE_URL="https://example.supabase.co",
+        SUPABASE_KEY="",
+        SUPABASE_KEY_FILE=str(supabase_key_file),
+        ASIGNAR_FOLDER_API_TOKEN="",
+        ASIGNAR_FOLDER_API_TOKEN_FILE=str(api_token_file),
+        ENVIRONMENT="production",
+    )
+
+    assert file_settings.SUPABASE_KEY == "supabase-test-key"
+    assert file_settings.ASIGNAR_FOLDER_API_TOKEN == "internal-test-token"
+
+
+def test_settings_falla_cerrado_sin_token_en_produccion() -> None:
+    with pytest.raises(ValueError, match="obligatorio en produccion"):
+        Settings(
+            _env_file=None,
+            SUPABASE_PROJECT_ID="local-test",
+            SUPABASE_URL="https://example.supabase.co",
+            SUPABASE_KEY="supabase-test-key",
+            ASIGNAR_FOLDER_API_TOKEN="",
+            ASIGNAR_FOLDER_API_TOKEN_FILE="",
+            ENVIRONMENT="production",
+        )
 
 
 def test_asignar_folder_empresa_myma(monkeypatch) -> None:

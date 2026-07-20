@@ -1,0 +1,20 @@
+[Unit]
+Description=MyMA API asignar folder ID
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/home/camilomansillaulloa/apps/api-acreditacion-asginar-id-folder-a-requerimientos-de-solicitud
+EnvironmentFile=/etc/default/myma-asignar-folder
+ExecStartPre=/home/camilomansillaulloa/apps/api-acreditacion-asginar-id-folder-a-requerimientos-de-solicitud/deploy/gcp/materialize-secrets.sh
+ExecStart=/usr/bin/docker compose -f deploy/gcp/docker-compose.prod.yml up -d --build --remove-orphans
+ExecReload=/usr/bin/docker compose -f deploy/gcp/docker-compose.prod.yml up -d --build --remove-orphans
+ExecStop=/usr/bin/docker compose -f deploy/gcp/docker-compose.prod.yml down
+TimeoutStartSec=600
+TimeoutStopSec=90
+
+[Install]
+WantedBy=multi-user.target

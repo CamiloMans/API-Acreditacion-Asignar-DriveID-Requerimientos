@@ -8,8 +8,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 
 # Create a dedicated unprivileged user for runtime.
-RUN groupadd --system app && \
-    useradd --system --gid app --create-home --home-dir /home/app app
+RUN groupadd --gid 10001 app && \
+    useradd --uid 10001 --gid app --create-home --home-dir /home/app --no-log-init app
 
 # Copy dependency manifest first to maximize layer cache reuse.
 COPY requirements.txt ./
